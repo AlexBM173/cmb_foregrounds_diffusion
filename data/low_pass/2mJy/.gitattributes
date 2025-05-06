@@ -1,0 +1,5 @@
+new_samples_16_cib_tsz3_2mJy_zero_norm_6x6_w_au_lp.npy filter=lfs diff=lfs merge=lfs -text
+cut_maps_RES_256_ANG_X_6.0[[:space:]]deg_2mJy_lp_tsz3.npy filter=lfs diff=lfs merge=lfs -text
+cut_maps_RES_256_ANG_X_6.0[[:space:]]deg_2mJy_lp.npy filter=lfs diff=lfs merge=lfs -text
+cut_maps_RES_256_ANG_X_6.0[[:space:]]deg_2mJy_lp.npy filter=lfs diff=lfs merge=lfs -text
+cut_maps_RES_256_ANG_X_6.0[[:space:]]deg_2mJy_lp_tsz3.npy filter=lfs diff=lfs merge=lfs -text

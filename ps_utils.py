@@ -1,8 +1,32 @@
 import numpy as np
-import torch
-from scipy.fftpack import fft2, ifft2, fftshift, ifftshift
+from scipy.fftpack import fft2, ifft2
 import numpy as np, sys, os, warnings
 
+def load_all_moments(filename, bandpass_centers, max_lines=-1):
+    moments_data = np.load(filename)[:max_lines]
+    moments = {}
+
+    norms = [
+        bandpass_centers,        # S2aa
+        bandpass_centers,        # S2bb
+        bandpass_centers,        # S2ab
+        bandpass_centers,        # S3aaa
+        bandpass_centers,        # S3bbb
+        bandpass_centers,        # S3aab
+        bandpass_centers,        # S3abb
+        bandpass_centers**2,     # S4aaaa
+        bandpass_centers**2,     # S4bbbb
+        bandpass_centers**2,     # S4aaab
+        bandpass_centers**2,     # S4aabb
+        bandpass_centers**2      # S4abbb
+    ]
+
+    for i in range(12):
+        label = f"moment_{i:02d}"
+        moments[label] = [m / norms[i] for m in moments_data[:, :, i]]
+
+    return moments
+    
 def get_peak_masks(tmap, mask_threshold_sigma_units = 10, mask_radius_pixel_units = 0, perform_apod = 1, mask_shape = 'circle', taper_radius_fac = 2. ):
     
     """

@@ -2,6 +2,11 @@ import numpy as np
 from scipy.fftpack import fft2, ifft2
 import numpy as np, sys, os, warnings
 
+def apply_maxmin_normalization(maps):
+    min_val = np.min(maps)
+    max_val = np.max(maps)
+    return (maps - min_val) / (max_val - min_val) 
+    
 def load_all_moments(filename, bandpass_centers, max_lines=-1):
     moments_data = np.load(filename)[:max_lines]
     moments = {}

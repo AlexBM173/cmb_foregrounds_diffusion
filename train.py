@@ -17,25 +17,24 @@ ptsrc = 2
 ##################
 
 #################
-#fpath_cib = f"data/low_pass/{ptsrc}mJy/CIB_map_150GHz_256_st6_minmax_{ptsrc}mJy_zero_lp.npy"
-#fpath_tsz = f"data/low_pass/{ptsrc}mJy/tSZ3_map_150GHz_256_st6_minmax_{ptsrc}mJy_norm_lp.npy"
-#cib_maps = np.load(fpath_cib)  # (N, H, W, 1)
-#tsz_maps = np.load(fpath_tsz)  # (N, H, W, 1)
-#cib_maps = np.load(fpath_cib)  # (N, H, W, 1)
-#tsz_maps = np.load(fpath_tsz)  # (N, H, W, 1)
-#cut_maps = np.concatenate([cib_maps, tsz_maps], axis=-1)
-
+fpath_cib = f"data/low_pass/{ptsrc}mJy/CIB_map_150GHz_256_st6_minmax_{ptsrc}mJy_zero_lp.npy"
+fpath_tsz = f"data/low_pass/{ptsrc}mJy/tSZ3_map_150GHz_256_st6_minmax_{ptsrc}mJy_norm_lp.npy"
+cib_maps = np.load(fpath_cib)  # (N, H, W, 1)
+tsz_maps = np.load(fpath_tsz)  # (N, H, W, 1)
+cut_maps = np.concatenate([cib_maps, tsz_maps], axis=-1)
 ###################
 
-fpath_cib_95 = f"data/low_pass/{ptsrc}mJy/CIB_map_95GHz_256_st6_minmax_{ptsrc}mJy_zero_lp.npy"
-fpath_cib_150 = f"data/low_pass/{ptsrc}mJy/CIB_map_150GHz_256_st6_minmax_{ptsrc}mJy_zero_lp.npy"
-fpath_cib_857 = f"data/low_pass/{ptsrc}mJy/CIB_map_857GHz_256_st6_minmax_{ptsrc}mJy_zero_lp.npy"
+##################
+#fpath_cib_95 = f"data/low_pass/{ptsrc}mJy/CIB_map_95GHz_256_st6_minmax_{ptsrc}mJy_zero_lp.npy"
+#fpath_cib_150 = f"data/low_pass/{ptsrc}mJy/CIB_map_150GHz_256_st6_minmax_{ptsrc}mJy_zero_lp.npy"
+#fpath_cib_857 = f"data/low_pass/{ptsrc}mJy/CIB_map_857GHz_256_st6_minmax_{ptsrc}mJy_zero_lp.npy"
 
-cib_maps_95 = np.load(fpath_cib_95)
-cib_maps_150 = np.load(fpath_cib_150)
-cib_maps_857 = np.load(fpath_cib_857)
+#cib_maps_95 = np.load(fpath_cib_95)
+#cib_maps_150 = np.load(fpath_cib_150)
+#cib_maps_857 = np.load(fpath_cib_857)
 
-cut_maps = np.concatenate([cib_maps_95, cib_maps_150, cib_maps_857], axis=-1)
+#cut_maps = np.concatenate([cib_maps_95, cib_maps_150, cib_maps_857], axis=-1)
+####################
 
 cut_maps = cut_maps.transpose(0, 3, 1, 2)  # (N, 2, H, W)
 
@@ -44,7 +43,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 model = Unet(
     dim = 64,
     dim_mults = (1, 2, 4, 8),
-    channels=3,
+    channels=2,
     flash_attn = True
 )
 #model.to(device);
@@ -94,7 +93,7 @@ diffusion,
 dataset = dataset,
 train_batch_size = 16,
 num_samples=1,
-train_lr = 5e-5,
+train_lr = 1e-4,
 train_num_steps = 100000,         # total training steps
 save_and_sample_every = 5000,
 gradient_accumulate_every = 2,    # gradient accumulation steps
@@ -102,5 +101,5 @@ ema_decay = 0.995,                # exponential moving average decay
 amp = True,                       # turn on mixed precision
 )
 
-trainer.load(14)
+#trainer.load(14)
 trainer.train()

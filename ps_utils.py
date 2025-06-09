@@ -3,8 +3,8 @@ from scipy.fftpack import fft2, ifft2
 import numpy as np, sys, os, warnings
 
 def apply_maxmin_normalization(maps):
-    min_val = np.min(maps)
-    max_val = np.max(maps)
+    min_val = np.nanmin(maps)
+    max_val = np.nanmax(maps)
     return (maps - min_val) / (max_val - min_val) 
     
 def load_all_moments(filename, bandpass_centers, max_lines=-1):
@@ -191,7 +191,7 @@ def cl_to_cl2d(el, cl, flatskymapparams):
     cl2d = np.interp(ell.flatten(), el, cl).reshape(ell.shape) 
 
     return cl2d
-def map2cl(flatskymapparams, flatskymap1, flatskymap2 = None, binsize = None):
+def map2cl(flatskymapparams, flatskymap1, flatskymap2 = None, binsize = None, minbin = 100, maxbin = 10000,):
 
     """
     map2cl module - get the power spectra of map/maps
@@ -226,7 +226,7 @@ def map2cl(flatskymapparams, flatskymap1, flatskymap2 = None, binsize = None):
         assert flatskymap1.shape == flatskymap2.shape
         flatskymap_psd = np.fft.fft2(flatskymap1) * dx_rad * np.conj( np.fft.fft2(flatskymap2) ) * dx_rad / (nx * ny)
 
-    rad_prf = radial_profile(flatskymap_psd, (lx,ly), bin_size = binsize, minbin = 100, maxbin = 10000, to_arcmins = 0)
+    rad_prf = radial_profile(flatskymap_psd, (lx,ly), bin_size = binsize, minbin = minbin, maxbin = maxbin, to_arcmins = 0)
     el, cl = rad_prf[:,0], rad_prf[:,1]
 
     return el, cl

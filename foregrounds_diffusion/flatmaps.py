@@ -1,7 +1,6 @@
 import numpy as np
 import sys
 import os
-from scipy import ndimage
 
 class FlatSkyMap:
     def __init__(self, height: int, width: int, pixel_size: float):

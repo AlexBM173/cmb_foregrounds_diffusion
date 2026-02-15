@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.fftpack import fft2, ifft2
 import numpy as np, sys, os, warnings
+import scipy as sc
+import scipy.ndimage as ndimage
 
 def apply_maxmin_normalization(maps):
     min_val = np.nanmin(maps)
@@ -68,9 +70,6 @@ def get_peak_masks(tmap, mask_threshold_sigma_units = 10, mask_radius_pixel_unit
         Only computed when mask_radius_pixel_units>0.
         else, mask_radius_pixel_units == peak_mask
     """
-
-    import scipy as sc
-    import scipy.ndimage as ndimage
 
     assert mask_radius_pixel_units >=0
 
@@ -147,9 +146,6 @@ def boundary_apod_mask(x_grid, y_grid, mask_radius, perform_apod = True, mask_sh
     """
 
     assert mask_shape in ['circle', 'square']
-
-    import scipy as sc
-    import scipy.ndimage as ndimage
 
     mask = np.ones( y_grid.shape )
 

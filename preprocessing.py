@@ -9,7 +9,7 @@ os.makedirs(output_directory, exist_ok=True)
 
 # --- Extract and save per-slice catalogues ---
 
-for slice_num in range(149, 201):
+for slice_num in range(93, 100):
     filename = f"haloslc/haloslc_rot_{slice_num}_v050223.npz"
     working_file_path = os.path.join(data_directory, filename)
 
@@ -25,7 +25,7 @@ for slice_num in range(149, 201):
 
 all_data = {}
 
-for slice_num in range(149, 201):
+for slice_num in range(4, 201):
     input_path = os.path.join(output_directory, f"halos_rot_{slice_num:03d}_m500gt1e13.npz")
     with np.load(input_path, allow_pickle=True) as x:
         if not all_data:
@@ -36,7 +36,7 @@ for slice_num in range(149, 201):
 
 combined = {key: np.concatenate(arrays, axis=0) for key, arrays in all_data.items()}
 
-catalogue_path = os.path.join(output_directory, "halo_catalogue_rot_4-81_m500gt1e13.npz")
+catalogue_path = os.path.join(output_directory, "halo_catalogue_m500gt3e14.npy")
 np.savez(catalogue_path, **combined)
 
 total = len(combined["totm500"])

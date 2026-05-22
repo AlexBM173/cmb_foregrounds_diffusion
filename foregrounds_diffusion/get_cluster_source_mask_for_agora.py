@@ -20,7 +20,7 @@ def get_mdpl2_halo_cat(halo_cat_fname, get_velocities=True):
     Parameters
     ----------
     halo_cat_fname : str
-        Path to the ``.npy`` halo catalogue file.
+        Path to the halo catalogue file (.npy or .npz).
     get_velocities : bool
         If *True*, also return the three velocity components.
 
@@ -31,11 +31,27 @@ def get_mdpl2_halo_cat(halo_cat_fname, get_velocities=True):
         ``(ra, dec, z, m200c, m500c, vlos, vtht, vphi)`` when
         ``get_velocities=True``.
     """
-    halo_cat = np.load(halo_cat_fname, allow_pickle=True)
-    cols = halo_cat.T  # ra, dec, z, m200c, m500c, vlos, vtht, vphi
+    loaded = np.load(halo_cat_fname, allow_pickle=True)
+
+    if isinstance(loaded, np.lib.npyio.NpzFile):
+        mdpl2_ra    = loaded['totra']
+        mdpl2_dec   = loaded['totdec']
+        mdpl2_z     = loaded['totz']
+        mdpl2_m200c = loaded['totm200']
+        mdpl2_m500c = loaded['totm500']
+        mdpl2_vlos  = loaded['totvlos']
+        mdpl2_vtht  = loaded['totvtht']
+        mdpl2_vphi  = loaded['totvphi']
+    else:
+        # Legacy .npy format: columns packed as rows
+        cols = loaded.T
+        mdpl2_ra, mdpl2_dec, mdpl2_z, mdpl2_m200c, mdpl2_m500c, \
+            mdpl2_vlos, mdpl2_vtht, mdpl2_vphi = cols
+
     if get_velocities:
-        return tuple(cols)
-    return tuple(cols[:5])
+        return mdpl2_ra, mdpl2_dec, mdpl2_z, mdpl2_m200c, mdpl2_m500c, \
+               mdpl2_vlos, mdpl2_vtht, mdpl2_vphi
+    return mdpl2_ra, mdpl2_dec, mdpl2_z, mdpl2_m200c, mdpl2_m500c
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +306,8 @@ def get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname,
     if howmanythetaforclusters > 0:
         try:
             from colossus.halo import concentration, mass_defs
+            from colossus.cosmology import cosmology as colossus_cosmology
+            colossus_cosmology.setCosmology('planck15')
         except ImportError:
             raise ImportError("colossus is required for θ_500c-based masking.")
 

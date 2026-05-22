@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "foregrounds-diffusion"
+name = "foregrounds_diffusion"
 version = "0.1.0"
 description = "DDPM pipeline for generating correlated CIB and tSZ extragalactic CMB foregrounds"
 readme = "README.md"

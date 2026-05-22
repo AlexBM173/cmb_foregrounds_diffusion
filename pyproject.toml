@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foregrounds-diffusion"
+version = "0.1.0"
+description = "DDPM pipeline for generating correlated CIB and tSZ extragalactic CMB foregrounds"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Alexander Martin", email = "alexbm173@gmail.com" },
+]
+license = { text = "MIT" }
+keywords = ["cosmology", "CMB", "diffusion models", "deep learning", "astrophysics"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "torch>=2.10",
+    "torchvision>=0.25",
+    "accelerate>=1.12",
+    "denoising-diffusion-pytorch>=2.2.5",
+    "healpy>=1.19",
+    "astropy>=7.2",
+    "einops>=0.8",
+    "ema-pytorch>=0.7",
+    "pillow>=12.0",
+    "pytorch-fid>=0.3",
+    "tqdm>=4.67",
+]
+
+[project.scripts]
+fd-sample = "foregrounds_diffusion.sample:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["foregrounds_diffusion*"]
+
+[tool.setuptools.package-data]
+foregrounds_diffusion = ["py.typed"]

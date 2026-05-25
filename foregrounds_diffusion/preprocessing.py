@@ -12,40 +12,23 @@ from foregrounds_diffusion.flatmaps import get_lxly, cl_to_cl2d
 # ---------------------------------------------------------------------------
 
 def apply_maxmin_normalization(maps):
-    """Min-max normalise an array to [0, 1].
-
-    Parameters
-    ----------
-    maps : ndarray
-        Input array of any shape.
-
-    Returns
-    -------
-    ndarray
-        Normalised array.
-    """
     min_val = np.nanmin(maps)
     max_val = np.nanmax(maps)
-    return (maps - min_val) / (max_val - min_val)
+    denom = max_val - min_val
+    if denom == 0:
+        return np.zeros_like(maps)
+    return (maps - min_val) / denom
 
 
 def apply_stdnorm(maps):
-    """Standard-normalise an array channel-wise: (x − μ) / σ.
-
-    Parameters
-    ----------
-    maps : ndarray, shape (..., C)
-        Input array whose last axis is the channel dimension.
-
-    Returns
-    -------
-    ndarray
-        Normalised array with the same shape.
-    """
     maps = maps.copy()
     for c in range(maps.shape[-1]):
         channel = maps[..., c]
-        maps[..., c] = (channel - np.mean(channel)) / np.std(channel)
+        std = np.std(channel)
+        if std == 0:
+            maps[..., c] = 0.
+        else:
+            maps[..., c] = (channel - np.mean(channel)) / std
     return maps
 
 

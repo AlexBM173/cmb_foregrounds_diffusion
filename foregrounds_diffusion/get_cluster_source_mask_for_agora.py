@@ -262,6 +262,7 @@ def get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname,
     cluster_lmz_dic : dict, optional
         Redshift-dependent mass-limit dictionary (required when
         ``m500c_threshold=-1``).  Must contain keys ``'redshift'`` and
+    
         ``'M500c'``.
     howmanythetaforclusters : float
         If ``> 0``, compute the mask radius as this multiple of θ_500c.
@@ -336,8 +337,32 @@ def get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname,
         cluster_mask_radius_am_arr = arr_mod
 
     # --- build per-radius binary masks ---
+    # Original implementation
+    #npix = hp.nside2npix(nside)
+    #hmask_dic = {}
+    #for cntr, iii in enumerate(clus_inds):
+        #if cntr % 5000 == 0:
+            #print(cntr)
+        #ppp = hp.ang2pix(nside,
+                         #np.radians(90. - mdpl2_dec[iii]),
+                         #np.radians(mdpl2_ra[iii]))
+        #if howmanythetaforclusters > 0:
+            #r_am = cluster_mask_radius_am_arr[cntr]
+        #else:
+            #r_am = get_cluster_mask_radius(mdpl2_m500c[iii])
+
+        #ivec = hp.pix2vec(nside, ppp)
+        #disc = hp.query_disc(nside, ivec, np.deg2rad(r_am / 60.))
+        #if r_am not in hmask_dic:
+            #hmask_dic[r_am] = np.ones(npix)
+        #hmask_dic[r_am][disc] = 0.
+
+    # --- build combined binary mask directly ---
+    # Memory-friendly approach
+    import gc
     npix = hp.nside2npix(nside)
-    hmask_dic = {}
+    combined_mask = np.ones(npix, dtype=np.float32)
+
     for cntr, iii in enumerate(clus_inds):
         if cntr % 5000 == 0:
             print(cntr)
@@ -351,27 +376,48 @@ def get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname,
 
         ivec = hp.pix2vec(nside, ppp)
         disc = hp.query_disc(nside, ivec, np.deg2rad(r_am / 60.))
-        if r_am not in hmask_dic:
-            hmask_dic[r_am] = np.ones(npix)
-        hmask_dic[r_am][disc] = 0.
+        combined_mask[disc] = 0.
+
+    del mdpl2_ra, mdpl2_dec, mdpl2_z, mdpl2_m200c, mdpl2_m500c
+    del mdpl2_vlos, mdpl2_vtht, mdpl2_vphi, clus_inds
+    gc.collect()
 
     # --- apodise ---
+    print("Starting apodisation")
+
+    # Memory-friendly Gaussian smoothing approach
     if apodise:
-        hmask_smoothed_dic = {}
-        for r_am in sorted(hmask_dic):
-            apod_angle_am = 10. if r_am <= 10. else 20.
-            apod_angle = np.radians(apod_angle_am / 60.)
-            dist_smooth_angle = np.radians(r_am / 60.)
-            apod_start_dist = 0.
-            apod_end_dist = apod_start_dist + apod_angle
-
-            curr = hmask_dic[r_am]
-            curr_smoothed = apodize_binary_mask_prof(
-                curr, dist_smooth_angle, apod_start_dist, apod_end_dist)
-            hmask_smoothed_dic[r_am] = curr_smoothed / np.max(curr_smoothed)
+        apod_fwhm_rad = np.radians(15. / 60.)  # 15 arcmin apodisation
+        # Smooth the binary mask with a Gaussian — values taper from 1 to 0 near edges
+        final_hmask = hp.smoothing(combined_mask, fwhm=apod_fwhm_rad, 
+                                   lmax=2*nside).astype(np.float32)
+        del combined_mask
+        gc.collect()
+        # Clip: smoothing can produce small negative values at sharp edges
+        final_hmask = np.clip(final_hmask, 0., 1.)
+        final_hmask /= final_hmask.max()
     else:
-        hmask_smoothed_dic = copy.deepcopy(hmask_dic)
+        final_hmask = combined_mask
 
-    final_hmask = np.prod(list(hmask_smoothed_dic.values()), axis=0)
-    final_hmask /= np.max(final_hmask)
-    return final_hmask
+    return final_hmask  # this line was missing
+
+    # Original implementation --------------------
+    #if apodise:
+        #hmask_smoothed_dic = {}
+        #for r_am in sorted(hmask_dic):
+            #apod_angle_am = 10. if r_am <= 10. else 20.
+            #apod_angle = np.radians(apod_angle_am / 60.)
+            #dist_smooth_angle = np.radians(r_am / 60.)
+            #apod_start_dist = 0.
+            #apod_end_dist = apod_start_dist + apod_angle
+
+            #curr = hmask_dic[r_am]
+            #curr_smoothed = apodize_binary_mask_prof(
+                #curr, dist_smooth_angle, apod_start_dist, apod_end_dist)
+            #hmask_smoothed_dic[r_am] = curr_smoothed / np.max(curr_smoothed)
+    #else:
+        #hmask_smoothed_dic = copy.deepcopy(hmask_dic)
+
+    #final_hmask = np.prod(list(hmask_smoothed_dic.values()), axis=0)
+    #final_hmask /= np.max(final_hmask)
+    #return final_hmask

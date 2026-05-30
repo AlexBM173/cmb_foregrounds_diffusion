@@ -44,6 +44,30 @@ def get_lxly_az_angle(lx, ly):
     """
     return 2 * np.arctan2(lx, -ly)
 
+# ---------------------------------------------------------------------------
+# Get low, high, or band pass filter in Fourier space
+# ---------------------------------------------------------------------------
+
+def get_lpf_hpf(flatskymapparams, lmin_lmax, filter_type = 0):
+    """
+    filter_type = 0 - low pass filter
+    filter_type = 1 - high pass filter
+    filter_type = 2 - band pass
+    """
+
+    lx, ly = get_lxly(flatskymapparams)
+    ell = np.sqrt(lx**2. + ly**2.)
+    fft_filter = np.ones(ell.shape)
+    if filter_type == 0:
+        fft_filter[ell>lmin_lmax] = 0.
+    elif filter_type == 1:
+        fft_filter[ell<lmin_lmax] = 0.
+    elif filter_type == 2:
+        lmin, lmax = lmin_lmax
+        fft_filter[ell<lmin] = 0.
+        fft_filter[ell>lmax] = 0
+
+    return fft_filter
 
 # ---------------------------------------------------------------------------
 # Power-spectrum ↔ map conversion
@@ -305,8 +329,8 @@ def radial_profile(z, xy=None, bin_size=1., minbin=0., maxbin=10.,
         radprf[b, 0] = bin_lo + bin_size / 2.
         hits = len(np.where(abs(z[ind]) > 0.)[0])
         if hits > 0:
-            radprf[b, 1] = np.sum(z[ind]) / hits
-            radprf[b, 2] = np.std(z[ind])
+            radprf[b, 1] = np.real(np.sum(z[ind]) / hits)
+            radprf[b, 2] = np.std(np.real(z[ind]))
         hit_count.append(hits)
 
     hit_count = np.asarray(hit_count)

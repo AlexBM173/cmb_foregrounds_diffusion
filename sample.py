@@ -22,7 +22,7 @@ from denoising_diffusion_pytorch import GaussianDiffusion, Unet
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-DEFAULT_CHECKPOINT = "results/model-14.pt"
+DEFAULT_CHECKPOINT = "results/model-20.pt"
 DEFAULT_OUTPUT = "data/low_pass/2mJy/new_samples_cib_tsz_2mJy_zero_norm_6x6_w_au_lp.npy"
 DEFAULT_BATCHES = 5
 DEFAULT_BATCH_SIZE = 16

@@ -118,7 +118,7 @@ def load_all_moments(filename, bandpass_centers, max_lines=-1):
 # ---------------------------------------------------------------------------
 
 @u.quantity_input
-def get_patch_centers(gal_cut: u.deg, step_size: u.deg):
+def get_patch_centers(gal_cut: u.deg, step_size: u.deg, pole_cut: u.deg):
     """Compute patch centres on the sky, avoiding the Galactic plane.
 
     Parameters
@@ -135,8 +135,9 @@ def get_patch_centers(gal_cut: u.deg, step_size: u.deg):
     """
     gal_cut = gal_cut.to(u.deg)
     step_size = step_size.to(u.deg)
-    southern = np.arange(-90, (-gal_cut - step_size).value, step_size.value) * u.deg
-    northern = np.arange((gal_cut + step_size).value, 90, step_size.value) * u.deg
+    pole_cut = pole_cut.to(u.deg)
+    southern = np.arange(-90 + pole_cut/2, (-gal_cut - step_size).value, step_size.value) * u.deg
+    northern = np.arange((gal_cut + step_size).value, 90 - pole_cut/2, step_size.value) * u.deg
     lat_range = np.concatenate((southern, northern))
 
     centers = []

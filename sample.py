@@ -23,7 +23,7 @@ from denoising_diffusion_pytorch import GaussianDiffusion, Unet
 # Defaults
 # ---------------------------------------------------------------------------
 DEFAULT_CHECKPOINT = "results/model-20.pt"
-DEFAULT_OUTPUT = "data/low_pass/2mJy/new_samples_cib_tsz_2mJy_zero_norm_6x6_w_au_lp.npy"
+DEFAULT_OUTPUT = "docs/tutorials/data/low_pass/2mJy/new_samples_cib_tsz_2mJy_zscore_6x6_w_au_lp.npy"
 DEFAULT_BATCHES = 5
 DEFAULT_BATCH_SIZE = 16
 
@@ -125,7 +125,7 @@ def main():
                         help="Number of map channels (default: 2 for CIB+tSZ)")
     args = parser.parse_args()
 
-    accelerator = Accelerator(split_batches=True, mixed_precision='fp16')
+    accelerator = Accelerator(split_batches=True, mixed_precision='bf16')
 
     print(f"Loading checkpoint: {args.checkpoint}")
     diffusion = build_model(channels=args.channels)
@@ -141,6 +141,9 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(output_path, all_samples)
     print(f"Saved {all_samples.shape[0]} samples → {output_path}")
+    # After saving samples, also record which norm params to use
+    norm_params_path = Path("data/low_pass/2mJy/norm_params_2mJy.npy")
+    print(f"Denormalise using: {norm_params_path}")
 
 
 if __name__ == "__main__":

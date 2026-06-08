@@ -9,7 +9,7 @@ description = "DDPM pipeline for generating correlated CIB and tSZ extragalactic
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
-    { name = "Alexander Martin", email = "alexbm173@gmail.com" },
+    { name = "Alex Blake Martin", email = "alexbm173@gmail.com" },
 ]
 license = { text = "MIT" }
 keywords = ["cosmology", "CMB", "diffusion models", "deep learning", "astrophysics"]

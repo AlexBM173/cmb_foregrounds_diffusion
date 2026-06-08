@@ -69,6 +69,25 @@ def get_lpf_hpf(flatskymapparams, lmin_lmax, filter_type = 0):
 
     return fft_filter
 
+
+def bandpass_filter(fmap, bp):
+    """Apply a 2D bandpass filter to a real-valued flat-sky map.
+
+    Parameters
+    ----------
+    fmap : ndarray, shape (ny, nx)
+        Input real-space map.
+    bp : ndarray, shape (ny, nx)
+        2D filter in Fourier space (e.g. from :func:`get_lpf_hpf` with
+        ``filter_type=2``).
+
+    Returns
+    -------
+    ndarray
+        Filtered real-space map.
+    """
+    return np.fft.ifft2(np.fft.fft2(fmap) * bp).real
+
 # ---------------------------------------------------------------------------
 # Power-spectrum ↔ map conversion
 # ---------------------------------------------------------------------------

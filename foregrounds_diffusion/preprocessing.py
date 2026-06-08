@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import healpy as hp
 import astropy.units as u
+import os
 from scipy import ndimage, optimize
 
 from foregrounds_diffusion.flatmaps import get_lxly, cl_to_cl2d
@@ -67,6 +68,29 @@ def renormalize_dm_maps(dm_maps, train_maps, variance_scaling=True):
             )
 
     return np.transpose(dm_maps, (0, 3, 1, 2))
+
+
+def denormalize_dm_maps(dm_maps, cib_mean, cib_std, tsz_mean, tsz_std):
+    """Invert Z-score normalisation applied during patch extraction.
+
+    Parameters
+    ----------
+    dm_maps : ndarray, shape (N, 2, H, W)
+        Raw DDPM samples in Z-score space (channels-first).
+    cib_mean, cib_std : float
+        Z-score parameters for the CIB channel (channel 0).
+    tsz_mean, tsz_std : float
+        Z-score parameters for the tSZ channel (channel 1).
+
+    Returns
+    -------
+    ndarray, shape (N, 2, H, W)
+        Denormalised maps in the same physical units as the training patches.
+    """
+    dm_maps = dm_maps.copy()
+    dm_maps[:, 0] = dm_maps[:, 0] * cib_std + cib_mean
+    dm_maps[:, 1] = dm_maps[:, 1] * tsz_std + tsz_mean
+    return dm_maps
 
 
 # ---------------------------------------------------------------------------
@@ -136,8 +160,8 @@ def get_patch_centers(gal_cut: u.deg, step_size: u.deg, pole_cut: u.deg):
     gal_cut = gal_cut.to(u.deg)
     step_size = step_size.to(u.deg)
     pole_cut = pole_cut.to(u.deg)
-    southern = np.arange(-90 + pole_cut/2, (-gal_cut - step_size).value, step_size.value) * u.deg
-    northern = np.arange((gal_cut + step_size).value, 90 - pole_cut/2, step_size.value) * u.deg
+    southern = np.arange(-90 + pole_cut.value/2, (-gal_cut - step_size).value, step_size.value) * u.deg
+    northern = np.arange((gal_cut + step_size).value, 90 - pole_cut.value/2, step_size.value) * u.deg
     lat_range = np.concatenate((southern, northern))
 
     centers = []
@@ -377,6 +401,34 @@ def get_peak_masks(tmap, mask_threshold_sigma_units=10,
     return peak_mask, mask
 
 
+def inpaint_masked_regions(hmap, mask, rng=None):
+    """Replace masked pixels with Gaussian noise matching unmasked-region statistics.
+
+    Parameters
+    ----------
+    hmap : ndarray, shape (npix,)
+        HEALPix (or flat-sky) map.
+    mask : ndarray, shape (npix,)
+        Mask array (1 = keep, 0 = replace).
+    rng : numpy.random.Generator, optional
+        Random number generator.  A fresh ``default_rng()`` is used when *None*.
+
+    Returns
+    -------
+    ndarray
+        Copy of *hmap* with masked pixels replaced by Gaussian noise.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    hmap = hmap.copy()
+    unmasked = hmap[mask > 0.5]
+    mean = unmasked.mean()
+    std = unmasked.std()
+    masked_idx = np.where(mask < 0.5)[0]
+    hmap[masked_idx] = rng.normal(loc=mean, scale=std, size=len(masked_idx))
+    return hmap
+
+
 def boundary_apod_mask(x_grid, y_grid, mask_radius, perform_apod=True,
                        mask_shape='circle', taper_radius_fac=6.):
     """Create an apodised boundary mask on a 2D grid.
@@ -529,3 +581,29 @@ def split_data_to_tensors(data, train_size=0.7, val_size=0.15,
         data[indices[val_end:]].transpose(0, 3, 1, 2), dtype=torch.float32)
 
     return train_set, val_set, test_set
+
+
+# ---------------------------------------------------------------------------
+# Data augmentation
+# ---------------------------------------------------------------------------
+
+def augment_images_unique(images):
+    """Apply 8× augmentation: 4 rotations × horizontal flip.
+
+    Parameters
+    ----------
+    images : torch.Tensor, shape (N, C, H, W)
+        Training images in channels-first layout.
+
+    Returns
+    -------
+    torch.Tensor, shape (8N, C, H, W)
+        Augmented images (each original appears as 8 distinct variants).
+    """
+    augmented = []
+    for img in images:
+        for k in range(4):
+            rotated = torch.rot90(img, k=k, dims=(1, 2))
+            augmented.append(rotated)
+            augmented.append(torch.flip(rotated, dims=[2]))
+    return torch.stack(augmented)

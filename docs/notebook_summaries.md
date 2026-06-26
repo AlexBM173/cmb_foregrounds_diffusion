@@ -159,3 +159,36 @@ Wraps scattering transform backends to compute S1/S2 scattering coefficients and
 | `scattering_summary(coeffs, scale_idx=None)` | Flattens S1 and the upper-triangle S2 entries (j2 > j1) into a single feature vector of shape `(N, n_features)`, suitable for computing per-feature residuals between ensembles. |
 
 **Used by:** `docs/tutorials/11_scattering_transforms.ipynb`
+
+---
+
+## `docs/tutorials/12_minkowski_tensors.ipynb`
+
+Computes rank-2 Minkowski tensors for CIB and tSZ patches and compares anisotropy between Agora, DDPM, and Gaussian baseline. For each intensity threshold ν the map is binarised to the excursion set K = {x : T(x) > ν} and three tensor types are computed, each eigendecomposed to give β = λ_min/λ_max ∈ [0, 1] (anisotropy index; 1 = isotropic) and θ (major-axis orientation). All three tensor types are run so their different sensitivities can be compared before committing to a specific choice:
+
+- **W012** (W^{0,2}_1): boundary normal tensor via Sobel-estimated outward normals n⊗n. Probes isotropy of cluster boundary shapes. Recommended default.
+- **W200** (W^{2,0}_0): area inertia tensor r⊗r over interior pixels. Measures elongation of filled excursion regions.
+- **W201** (W^{2,0}_1): boundary position tensor r⊗r over boundary pixels. Hybrid sensitivity.
+
+Plots: (1) β(ν) 2×3 grid (rows = CIB/tSZ, cols = tensor type) with mean ± std bands; (2) polar θ histograms at ν = 0.2, 0.5, 0.8 using W012 — a uniform distribution is the Gaussian sanity check; (3) W012 residuals (β_Agora − β_DDPM)/σ_Agora with 1σ reference lines. Outputs `plots/minkowski_tensors_beta.pdf`, `plots/minkowski_tensors_theta.pdf`, `plots/minkowski_tensors_residuals.pdf`.
+
+**Paper relation:** No direct paper section — Minkowski tensors are a post-paper extension. They generalise the scalar Minkowski functionals in Figure 6 (§4.5) by adding directional information, exposing morphological anisotropy that MFs miss.
+
+**Module relation:** Uses `compute_minkowski_tensors` from `statistics.py`. Map loading and denormalisation follow the same pattern as notebooks 10–11.
+
+**Reference:** Schroder-Turk et al. (2013), *New J. Phys.* 15 083028.
+
+---
+
+### `foregrounds_diffusion/statistics.py` — Minkowski tensor additions
+
+New functions added after the paper, following the existing `compute_mfs` in the same file.
+
+| Function / object | Description |
+|---|---|
+| `compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, tensor_types=('W012',), centred=True)` | Top-level function. Applies `norm_fn` to each map, binarises at each threshold, computes the requested tensor(s), and eigendecomposes. Returns a dict keyed by tensor type, each containing `'beta'` `(N, T)` and `'theta'` `(N, T)`. Empty/full excursion sets return β = 1, θ = 0. |
+| `MINKOWSKI_TENSOR_DESCRIPTIONS` | Dict of human-readable descriptions keyed by tensor type string, for use in notebook headers and print statements. |
+| `_tensor_W012(binary_map)` | W^{0,2}_1: boundary pixels found via `binary_erosion`; outward normals estimated with `scipy.ndimage.sobel`; returns Σ n⊗n as a 2×2 array. |
+| `_tensor_W200(binary_map, centred=True)` | W^{2,0}_0: collects coordinates of all interior pixels, optionally centres at the excursion-set centroid, returns coords.T @ coords / N. |
+| `_tensor_W201(binary_map, centred=True)` | W^{2,0}_1: same as W200 but restricted to boundary pixels only. |
+| `_eigendecompose_2x2(W)` | Eigendecomposes a 2×2 symmetric tensor via `np.linalg.eigh`; returns β = λ_min/λ_max and θ (major eigenvector angle, wrapped to (-π/2, π/2]). |

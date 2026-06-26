@@ -36,7 +36,7 @@ The pipeline is:
 |---|---|
 | `flatmaps.py` | Flat-sky Fourier utilities: `get_lxly`, `map2cl`, `cl2map`, `make_gaussian_realisation`, `radial_profile`, polarisation E/B↔Q/U conversion |
 | `preprocessing.py` | Normalisation (`apply_maxmin_normalization`, `apply_stdnorm`), HEALPix patch extraction (`FlatCutter`, `get_patch_centers`), Fourier filtering (`get_lpf_hpf`, `wiener_filter`), masking, train/val/test splitting |
-| `statistics.py` | 2D Gaussian fitting (`fitgaussian`, `fitting_func`) and summary stats |
+| `statistics.py` | 2D Gaussian fitting (`fitgaussian`, `fitting_func`), power-spectrum summaries, higher-order moments (`compute_summed_moments`, `compute_cross_moments`), Minkowski functionals (`compute_mfs`), Minkowski tensors (`compute_minkowski_tensors`, `MINKOWSKI_TENSOR_DESCRIPTIONS`), and tSZ stacking utilities |
 | `get_cluster_source_mask_for_agora.py` | Apodised cluster/point-source mask generation for AGORA MDPL2 maps |
 | `train.py` | Training entry point (not a library module — run via `accelerate launch`) |
 | `sample.py` | Sampling entry point with CLI (`--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`) |
@@ -69,4 +69,4 @@ The `preprocessing.ipynb` notebook documents the full preprocessing pipeline fro
 - `docs/notebook_summaries.md` — description of every notebook in the repo, what each does, and how it maps to paper sections and `foregrounds_diffusion/` module functions.
 - `docs/paper_code_inconsistencies.md` — documented inconsistencies between the paper (Prabhu et al.) and the current codebase, covering masking, normalisation, augmentation, post-sampling rescaling, and noise schedule parameters.
 - `docs/potential_extensions.md` — ten proposed extensions with scientific motivation, implementation starting points, and known obstacles. Covers larger sky patches, conditional generation, additional foreground components, Bayesian integration, faster sampling, and more.
-- `docs/tutorials/` — eleven notebooks (01–11) covering the full pipeline from raw data to results. Notebooks 01–09 are the core tutorial sequence; 10 and 11 are post-paper extension evaluations (peak/minima counts and scattering transforms). Each has a summary cell describing inputs, outputs, key module functions, and the corresponding paper section.
+- `docs/tutorials/` — twelve notebooks (01–12) covering the full pipeline from raw data to results. Notebooks 01–09 are the core tutorial sequence; 10–12 are post-paper extension evaluations (peak/minima counts, scattering transforms, Minkowski tensors). Each has a summary cell describing inputs, outputs, key module functions, and the corresponding paper section.

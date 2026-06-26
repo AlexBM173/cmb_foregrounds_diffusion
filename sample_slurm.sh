@@ -14,12 +14,43 @@
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=apb86@cam.ac.uk
 
+# ---------------------------------------------------------------------------
+# Edit these before each submission
+# ---------------------------------------------------------------------------
+CHECKPOINT="results/run_v1/model-20.pt"   # path to trained checkpoint
+OUTPUT="data/low_pass/2mJy/samples.npy"   # output .npy file
+BATCHES=10                                 # number of sampling batches
+BATCH_SIZE=16                              # samples per batch (per GPU)
+USE_WANDB=false                            # set to true to enable WandB logging
+
+# ---------------------------------------------------------------------------
+
+echo "================================================"
+echo "Checkpoint: ${CHECKPOINT}"
+echo "Output    : ${OUTPUT}"
+echo "Samples   : $((BATCHES * BATCH_SIZE * 4)) (${BATCHES} batches × ${BATCH_SIZE} × 4 GPUs)"
+echo "WandB     : ${USE_WANDB}"
+echo "SLURM job : ${SLURM_JOB_ID}"
+echo "Started   : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "================================================"
+
+mkdir -p logs
+
 module load cuda/11.8
 source ~/diffusion_project_env/bin/activate
 
+export OMP_NUM_THREADS=4
+export TOKENIZERS_PARALLELISM=false
+
+WANDB_FLAG=""
+if [ "${USE_WANDB}" = "true" ]; then
+    WANDB_FLAG="--wandb"
+fi
+
 accelerate launch --multi_gpu --num_processes 4 \
-    ~/cmb_foregrounds_diffusion/sample.py \
-    --checkpoint results/model-20.pt \
-    --batches 10 \
-    --batch-size 16 \
-    --output data/low_pass/2mJy/new_samples_cib_tsz_2mJy_zero_norm_6x6_w_au_lp.npy
+    ~/cmb_foregrounds_diffusion/foregrounds_diffusion/sample.py \
+    --checkpoint "${CHECKPOINT}" \
+    --batches "${BATCHES}" \
+    --batch-size "${BATCH_SIZE}" \
+    --output "${OUTPUT}" \
+    ${WANDB_FLAG}

@@ -17,6 +17,7 @@ import numpy as np
 import torch
 from accelerate import Accelerator
 from denoising_diffusion_pytorch import GaussianDiffusion, Unet
+import wandb
 
 
 # ---------------------------------------------------------------------------
@@ -123,9 +124,27 @@ def main():
                         help="Output .npy file path")
     parser.add_argument("--channels", type=int, default=2,
                         help="Number of map channels (default: 2 for CIB+tSZ)")
+    parser.add_argument("--wandb", action="store_true", default=False,
+                        help="Enable Weights & Biases logging (also set via WANDB=1 env var)")
     args = parser.parse_args()
 
+    import os
+    use_wandb = args.wandb or os.environ.get("WANDB", "").strip() in ("1", "true", "yes")
+
     accelerator = Accelerator(split_batches=True, mixed_precision='fp16')
+
+    if use_wandb and accelerator.is_main_process:
+        wandb.init(
+            project="cmb_foregrounds_diffusion",
+            job_type="sampling",
+            config={
+                "checkpoint": args.checkpoint,
+                "batches": args.batches,
+                "batch_size": args.batch_size,
+                "channels": args.channels,
+                "output": args.output,
+            },
+        )
 
     print(f"Loading checkpoint: {args.checkpoint}")
     diffusion = build_model(channels=args.channels)
@@ -141,6 +160,18 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(output_path, all_samples)
     print(f"Saved {all_samples.shape[0]} samples → {output_path}")
+
+    if use_wandb and accelerator.is_main_process:
+        n_show = min(8, len(all_samples))
+        wandb.log({
+            "samples/cib": [wandb.Image(all_samples[i, 0]) for i in range(n_show)],
+            "samples/tsz": [wandb.Image(all_samples[i, 1]) for i in range(n_show)],
+            "n_samples": len(all_samples),
+        })
+        artifact = wandb.Artifact("samples", type="dataset")
+        artifact.add_file(str(output_path))
+        wandb.log_artifact(artifact)
+        wandb.finish()
 
 
 if __name__ == "__main__":

@@ -40,6 +40,8 @@ The pipeline is:
 | `get_cluster_source_mask_for_agora.py` | Apodised cluster/point-source mask generation for AGORA MDPL2 maps |
 | `train.py` | Training entry point (not a library module — run via `accelerate launch`) |
 | `sample.py` | Sampling entry point with CLI (`--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`) |
+| `peak_counts.py` | Peak and minima counting statistics (Sabyr et al. 2024): `smooth_map`, `find_peaks`, `find_minima`, `count_peaks_binned`, `count_minima_binned`, `compute_peak_minima_counts`. numpy/scipy only. |
+| `scattering_stats.py` | Scattering transform statistics: `compute_scattering_coefficients` (S1, S2), `compute_scattering_covariance` (C11, Cheng et al. backend only), `scattering_summary`. Requires Cheng et al. repo or `kymatio`. |
 | `redundant/` | Old scripts kept for reference; not part of the active codebase |
 
 ### Key data conventions
@@ -67,4 +69,4 @@ The `preprocessing.ipynb` notebook documents the full preprocessing pipeline fro
 - `docs/notebook_summaries.md` — description of every notebook in the repo, what each does, and how it maps to paper sections and `foregrounds_diffusion/` module functions.
 - `docs/paper_code_inconsistencies.md` — documented inconsistencies between the paper (Prabhu et al.) and the current codebase, covering masking, normalisation, augmentation, post-sampling rescaling, and noise schedule parameters.
 - `docs/potential_extensions.md` — ten proposed extensions with scientific motivation, implementation starting points, and known obstacles. Covers larger sky patches, conditional generation, additional foreground components, Bayesian integration, faster sampling, and more.
-- `docs/tutorials/` — nine stub notebooks (01–09) laying out a self-contained tutorial sequence from raw data to results, one per pipeline stage. Each has a summary cell describing inputs, outputs, key module functions, and the corresponding paper section.
+- `docs/tutorials/` — eleven notebooks (01–11) covering the full pipeline from raw data to results. Notebooks 01–09 are the core tutorial sequence; 10 and 11 are post-paper extension evaluations (peak/minima counts and scattering transforms). Each has a summary cell describing inputs, outputs, key module functions, and the corresponding paper section.

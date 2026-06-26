@@ -8,13 +8,25 @@ flatmaps
 
 preprocessing
     Data normalisation, HEALPix patch extraction, Fourier filtering,
-    masking, and train/val/test splitting.
+    and train/val/test splitting.
 
 statistics
     2D Gaussian fitting and summary statistics.
 
-get_cluster_source_mask_for_agora
-    Apodised cluster and point-source mask generation for AGORA MDPL2 maps.
+moments
+    Power-spectrum helpers (mean_cls, mean_cross_cls) and higher-order
+    statistics (compute_summed_moments, compute_cross_moments).
+
+morphology
+    Minkowski functionals (compute_mfs) and Minkowski tensors
+    (compute_minkowski_tensors).
+
+stacking
+    tSZ cluster stacking utilities (select_snr_pixels, extract_cutouts).
+
+masking
+    Flat-sky peak masks and HEALPix cluster/point-source masks for AGORA
+    MDPL2 maps.
 
 diffusion
     Model definition (U-Net + GaussianDiffusion).
@@ -26,12 +38,17 @@ sample
     Sampling entry point (run via ``accelerate launch sample.py``).
 """
 
-from foregrounds_diffusion import flatmaps, preprocessing, statistics
-from foregrounds_diffusion import get_cluster_source_mask_for_agora
+from foregrounds_diffusion import (
+    flatmaps, preprocessing, statistics,
+    moments, morphology, stacking, masking,
+)
 
 __all__ = [
     "flatmaps",
     "preprocessing",
     "statistics",
-    "get_cluster_source_mask_for_agora",
+    "moments",
+    "morphology",
+    "stacking",
+    "masking",
 ]

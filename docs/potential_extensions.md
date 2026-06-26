@@ -138,7 +138,7 @@ Extensions are grouped by theme, roughly ordered from most to least directly tra
 
 **Motivation:** The scalar Minkowski functionals in Figure 6 measure area (M0), perimeter (M1), and Euler characteristic (M2) of excursion sets but discard all directional information. Minkowski tensors are rank-2 tensorial generalisations that additionally encode the *anisotropy* and *orientation* of morphological features — cluster boundary shapes, filament directions — providing a sensitive test of whether the DDPM reproduces the full geometry of the foreground fields, not just their scalar topology.
 
-**Implementation:** `foregrounds_diffusion/statistics.py` — `compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, tensor_types, centred)` returns β = λ_min/λ_max ∈ [0, 1] (anisotropy index) and θ (major-axis orientation) per map per threshold, for three tensor types:
+**Implementation:** `foregrounds_diffusion/morphology.py` — `compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, tensor_types, centred)` returns β = λ_min/λ_max ∈ [0, 1] (anisotropy index) and θ (major-axis orientation) per map per threshold, for three tensor types:
 - **W012** (W^{0,2}_1): boundary normal tensor via Sobel-estimated outward normals n⊗n. Probes isotropy of cluster boundary shapes. Recommended default.
 - **W200** (W^{2,0}_0): area inertia tensor r⊗r over interior pixels. Measures elongation of filled excursion regions.
 - **W201** (W^{2,0}_1): boundary position tensor r⊗r over boundary pixels. Hybrid sensitivity.

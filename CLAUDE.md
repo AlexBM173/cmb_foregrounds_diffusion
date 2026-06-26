@@ -35,13 +35,16 @@ The pipeline is:
 | Module | Responsibility |
 |---|---|
 | `flatmaps.py` | Flat-sky Fourier utilities: `get_lxly`, `map2cl`, `cl2map`, `make_gaussian_realisation`, `radial_profile`, polarisation E/B↔Q/U conversion |
-| `preprocessing.py` | Normalisation (`apply_maxmin_normalization`, `apply_stdnorm`), HEALPix patch extraction (`FlatCutter`, `get_patch_centers`), Fourier filtering (`get_lpf_hpf`, `wiener_filter`), masking, train/val/test splitting |
-| `statistics.py` | 2D Gaussian fitting (`fitgaussian`, `fitting_func`), power-spectrum summaries, higher-order moments (`compute_summed_moments`, `compute_cross_moments`), Minkowski functionals (`compute_mfs`), Minkowski tensors (`compute_minkowski_tensors`, `MINKOWSKI_TENSOR_DESCRIPTIONS`), and tSZ stacking utilities |
-| `get_cluster_source_mask_for_agora.py` | Apodised cluster/point-source mask generation for AGORA MDPL2 maps |
-| `train.py` | Training entry point (not a library module — run via `accelerate launch`) |
-| `sample.py` | Sampling entry point with CLI (`--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`) |
+| `preprocessing.py` | Normalisation (`apply_maxmin_normalization`, `apply_stdnorm`), HEALPix patch extraction (`FlatCutter`, `get_patch_centers`), Fourier filtering (`get_lpf_hpf`, `wiener_filter`), dataset splitting |
+| `statistics.py` | 2D Gaussian fitting (`gaussian`, `moments`, `fitgaussian`, `fitting_func`) and summary stats (`stats`) |
+| `moments.py` | Power-spectrum summaries (`mean_cls`, `mean_cross_cls`) and higher-order moments (`compute_summed_moments`, `compute_cross_moments`) |
+| `morphology.py` | Minkowski functionals (`compute_mfs`) and Minkowski tensors (`compute_minkowski_tensors`, `MINKOWSKI_TENSOR_DESCRIPTIONS`, `_tensor_W012/W200/W201`, `_eigendecompose_2x2`) |
+| `stacking.py` | tSZ cluster stacking utilities (`select_snr_pixels`, `extract_cutouts`) |
+| `masking.py` | Flat-sky peak masks (`get_peak_masks`, `inpaint_masked_regions`, `boundary_apod_mask`, `get_mask_using_gaussian_fitting`) and AGORA MDPL2 cluster/point-source masks (`get_point_source_mask_in_healpix`, `get_apodised_mdpl2_cluster_mask`, etc.) |
 | `peak_counts.py` | Peak and minima counting statistics (Sabyr et al. 2024): `smooth_map`, `find_peaks`, `find_minima`, `count_peaks_binned`, `count_minima_binned`, `compute_peak_minima_counts`. numpy/scipy only. |
 | `scattering_stats.py` | Scattering transform statistics: `compute_scattering_coefficients` (S1, S2), `compute_scattering_covariance` (C11, Cheng et al. backend only), `scattering_summary`. Requires Cheng et al. repo or `kymatio`. |
+| `train.py` | Training entry point (not a library module — run via `accelerate launch`) |
+| `sample.py` | Sampling entry point with CLI (`--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`) |
 | `redundant/` | Old scripts kept for reference; not part of the active codebase |
 
 ### Key data conventions

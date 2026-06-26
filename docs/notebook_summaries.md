@@ -174,21 +174,75 @@ Plots: (1) β(ν) 2×3 grid (rows = CIB/tSZ, cols = tensor type) with mean ± st
 
 **Paper relation:** No direct paper section — Minkowski tensors are a post-paper extension. They generalise the scalar Minkowski functionals in Figure 6 (§4.5) by adding directional information, exposing morphological anisotropy that MFs miss.
 
-**Module relation:** Uses `compute_minkowski_tensors` from `statistics.py`. Map loading and denormalisation follow the same pattern as notebooks 10–11.
+**Module relation:** Uses `compute_minkowski_tensors` from `morphology.py`. Map loading and denormalisation follow the same pattern as notebooks 10–11.
 
 **Reference:** Schroder-Turk et al. (2013), *New J. Phys.* 15 083028.
 
 ---
 
-### `foregrounds_diffusion/statistics.py` — Minkowski tensor additions
+## Package module structure (post-refactor)
 
-New functions added after the paper, following the existing `compute_mfs` in the same file.
+`statistics.py` was split into focused modules. The table below shows where each function now lives.
+
+### `foregrounds_diffusion/statistics.py`
+
+Gaussian fitting only.
+
+| Function | Description |
+|---|---|
+| `gaussian(height, cx, cy, wx, wy)` | Returns a 2D Gaussian callable `f(x, y)`. |
+| `moments(data)` | Estimates Gaussian parameters from image moments. |
+| `fitgaussian(data)` | Fits a 2D Gaussian by least squares via `scipy.optimize`. |
+| `fitting_func(p, p0, xgrid, ygrid, tmap, ...)` | Evaluates/fits a Gaussian model on a pixel grid; used by `masking.get_mask_using_gaussian_fitting`. |
+| `stats(maps)` | Returns `(min, max, mean, std)` of an array. |
+
+### `foregrounds_diffusion/moments.py`
+
+Power spectra and higher-order moments.
+
+| Function | Description |
+|---|---|
+| `mean_cls(maps_nhw, mapparams, lmin, lmax, binsize)` | Mean auto-power spectrum over a stack of maps. |
+| `mean_cross_cls(maps1, maps2, mapparams, lmin, lmax, binsize)` | Mean cross-power spectrum between two stacks. |
+| `compute_summed_moments(cib_arr, tsz_arr, bp_filters)` | S2/S3/S4 of the summed CIB+tSZ field per ℓ-band. Returns `(N, B, 3)`. |
+| `compute_cross_moments(cib_arr, tsz_arr, bp_filters)` | All 12 cross-moments (S2ᵃᵃ … S4ᵃᵇᵇᵇ) per ℓ-band. Returns `(N, B, 12)`. |
+
+### `foregrounds_diffusion/morphology.py`
+
+Minkowski functionals and tensors.
 
 | Function / object | Description |
 |---|---|
-| `compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, tensor_types=('W012',), centred=True)` | Top-level function. Applies `norm_fn` to each map, binarises at each threshold, computes the requested tensor(s), and eigendecomposes. Returns a dict keyed by tensor type, each containing `'beta'` `(N, T)` and `'theta'` `(N, T)`. Empty/full excursion sets return β = 1, θ = 0. |
-| `MINKOWSKI_TENSOR_DESCRIPTIONS` | Dict of human-readable descriptions keyed by tensor type string, for use in notebook headers and print statements. |
-| `_tensor_W012(binary_map)` | W^{0,2}_1: boundary pixels found via `binary_erosion`; outward normals estimated with `scipy.ndimage.sobel`; returns Σ n⊗n as a 2×2 array. |
-| `_tensor_W200(binary_map, centred=True)` | W^{2,0}_0: collects coordinates of all interior pixels, optionally centres at the excursion-set centroid, returns coords.T @ coords / N. |
-| `_tensor_W201(binary_map, centred=True)` | W^{2,0}_1: same as W200 but restricted to boundary pixels only. |
-| `_eigendecompose_2x2(W)` | Eigendecomposes a 2×2 symmetric tensor via `np.linalg.eigh`; returns β = λ_min/λ_max and θ (major eigenvector angle, wrapped to (-π/2, π/2]). |
+| `compute_mfs(maps_nhw, norm_fn, thresholds)` | Minkowski functionals M0/M1/M2 via `quantimpy`. Returns three `(N, T)` arrays. |
+| `compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, tensor_types=('W012',), centred=True)` | Eigendecomposes each Minkowski tensor at each threshold. Returns dict keyed by tensor type → `{'beta': (N,T), 'theta': (N,T)}`. |
+| `MINKOWSKI_TENSOR_DESCRIPTIONS` | Dict of human-readable descriptions keyed by tensor type string. |
+| `_tensor_W012(binary_map)` | W^{0,2}_1: Σ n⊗n over boundary pixels (Sobel normals). |
+| `_tensor_W200(binary_map, centred=True)` | W^{2,0}_0: Σ r⊗r over interior pixels. |
+| `_tensor_W201(binary_map, centred=True)` | W^{2,0}_1: Σ r⊗r over boundary pixels. |
+| `_eigendecompose_2x2(W)` | Returns β = λ_min/λ_max and θ (major axis, wrapped to (-π/2, π/2]). |
+
+### `foregrounds_diffusion/stacking.py`
+
+tSZ cluster stacking.
+
+| Function | Description |
+|---|---|
+| `select_snr_pixels(tsz_maps_nhw, snr_min, snr_max, min_separation=5)` | Finds local SNR-peak coordinates within a given SNR bin. Returns list of `(patch_idx, row, col)`. |
+| `extract_cutouts(maps_nhw, coords, cutout_size, max_cutouts=500)` | Extracts square cutouts centred on the given coordinates. Returns `(M, size, size)` or `None`. |
+
+### `foregrounds_diffusion/masking.py`
+
+Flat-sky and HEALPix masking (merged from `preprocessing.py` and `get_cluster_source_mask_for_agora.py`).
+
+| Function | Description |
+|---|---|
+| `get_peak_masks(tmap, ...)` | Sigma-clipping peak mask with optional apodisation. |
+| `inpaint_masked_regions(hmap, mask, rng=None)` | Replaces masked pixels with Gaussian noise matching unmasked statistics. |
+| `boundary_apod_mask(x_grid, y_grid, mask_radius, ...)` | Apodised boundary mask on a 2D grid. |
+| `get_mask_using_gaussian_fitting(nonpeak_mask, ...)` | Fits Gaussians to mask blobs and builds a smooth mask. |
+| `get_mdpl2_halo_cat(halo_cat_fname, ...)` | Loads the MDPL2 halo catalogue (.npy or .npz). |
+| `get_cluster_mask_radius(m500c)` | Returns mask radius in arcmin for a given M_500c. |
+| `get_point_source_mask_in_healpix(freq, hmap_Mjy_per_sr, ...)` | Identifies point-source pixels above a flux threshold. |
+| `get_mdpl2_conversion_factors_K_to_MjyperSr(expname, band)` | Looks up K → MJy/sr conversion factors by experiment and band. |
+| `apodize_binary_mask_prof(binary_mask, ...)` | Apodises a HEALPix binary mask using a cosine profile. |
+| `get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname, ...)` | Builds an apodised full-sky cluster mask from the MDPL2 halo catalogue. |

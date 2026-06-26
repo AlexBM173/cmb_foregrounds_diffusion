@@ -10,7 +10,85 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.utils.data as data
+from tqdm import tqdm
 from denoising_diffusion_pytorch import Unet, GaussianDiffusion, Trainer1D, Dataset1D
+from denoising_diffusion_pytorch.denoising_diffusion_pytorch_1d import num_to_groups
+
+import wandb
+
+# ---------------------------------------------------------------------------
+# Trainer with WandB loss logging
+# ---------------------------------------------------------------------------
+
+class WandbTrainer1D(Trainer1D):
+    """Trainer1D with optional per-step wandb loss and sample image logging."""
+
+    def __init__(self, *args, use_wandb: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.use_wandb = use_wandb
+
+    def train(self):
+        accelerator = self.accelerator
+        device = accelerator.device
+        log = self.use_wandb and accelerator.is_main_process
+
+        with tqdm(initial=self.step, total=self.train_num_steps,
+                  disable=not accelerator.is_main_process) as pbar:
+
+            while self.step < self.train_num_steps:
+                self.model.train()
+                total_loss = 0.
+
+                for _ in range(self.gradient_accumulate_every):
+                    data = next(self.dl).to(device)
+                    with self.accelerator.autocast():
+                        loss = self.model(data)
+                        loss = loss / self.gradient_accumulate_every
+                        total_loss += loss.item()
+                    self.accelerator.backward(loss)
+
+                pbar.set_description(f'loss: {total_loss:.4f}')
+
+                if log:
+                    wandb.log({"train/loss": total_loss}, step=self.step)
+
+                accelerator.wait_for_everyone()
+                accelerator.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                self.opt.step()
+                self.opt.zero_grad()
+                accelerator.wait_for_everyone()
+
+                self.step += 1
+                if accelerator.is_main_process:
+                    self.ema.update()
+
+                    if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                        self.ema.ema_model.eval()
+                        milestone = self.step // self.save_and_sample_every
+
+                        with torch.no_grad():
+                            batches = num_to_groups(self.num_samples, self.batch_size)
+                            all_samples = torch.cat(
+                                [self.ema.ema_model.sample(batch_size=n) for n in batches], dim=0
+                            )
+
+                        sample_path = self.results_folder / f'sample-{milestone}.pt'
+                        torch.save(all_samples, str(sample_path))
+                        self.save(milestone)
+
+                        if log:
+                            samples_np = all_samples.cpu().numpy()
+                            n_show = min(8, len(samples_np))
+                            wandb.log({
+                                "samples/cib": [wandb.Image(samples_np[i, 0]) for i in range(n_show)],
+                                "samples/tsz": [wandb.Image(samples_np[i, 1]) for i in range(n_show)],
+                                "checkpoint":  milestone,
+                            }, step=self.step)
+
+                pbar.update(1)
+
+        accelerator.print('training complete')
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -29,6 +107,8 @@ parser.add_argument("--res",        type=int,   default=256,    help="Map resolu
 parser.add_argument("--steps",      type=int,   default=100000, help="Training steps (default: 100000)")
 parser.add_argument("--batch-size", type=int,   default=16,     help="Batch size per GPU (default: 16)")
 parser.add_argument("--lr",         type=float, default=1e-4,   help="Learning rate (default: 1e-4)")
+parser.add_argument("--wandb",      action="store_true", default=False,
+                    help="Enable Weights & Biases logging (also set via WANDB=1 env var)")
 args = parser.parse_args()
 
 # Run name: CLI flag takes priority, then $RUN_NAME env var
@@ -39,6 +119,8 @@ if not run_name:
         "  CLI:   accelerate launch train.py --run-name my_run_v1\n"
         "  SLURM: set RUN_NAME=\"my_run_v1\" in train_slurm.sh"
     )
+
+use_wandb = args.wandb or os.environ.get("WANDB", "").strip() in ("1", "true", "yes")
 
 RES   = args.res
 PTSRC = args.ptsrc
@@ -80,7 +162,7 @@ model     = Unet(dim=64, dim_mults=(1, 2, 4, 8), channels=2, flash_attn=True)
 diffusion = GaussianDiffusion(model, image_size=256, timesteps=1000, auto_normalize=False)
 dataset   = Dataset1D(augmented_images)
 
-trainer = Trainer1D(
+trainer = WandbTrainer1D(
     diffusion,
     dataset=dataset,
     train_batch_size=args.batch_size,
@@ -91,6 +173,7 @@ trainer = Trainer1D(
     ema_decay=0.995,
     mixed_precision_type='bf16',
     results_folder=str(RESULTS_DIR),
+    use_wandb=use_wandb,
 )
 
 # Override dataloader after init with num_workers=0 to prevent hanging
@@ -123,6 +206,7 @@ run_config = {
     "train_steps":    args.steps,
     "batch_size":     args.batch_size,
     "lr":             args.lr,
+    "wandb":          use_wandb,
 }
 with open(RESULTS_DIR / "run_config.json", "w") as f:
     json.dump(run_config, f, indent=2)
@@ -132,7 +216,21 @@ print(json.dumps(run_config, indent=2))
 print()
 
 # ---------------------------------------------------------------------------
+# WandB
+# ---------------------------------------------------------------------------
+
+if use_wandb and trainer.accelerator.is_main_process:
+    wandb.init(
+        project="cmb_foregrounds_diffusion",
+        name=run_name,
+        config=run_config,
+    )
+
+# ---------------------------------------------------------------------------
 # Train
 # ---------------------------------------------------------------------------
 
 trainer.train()
+
+if use_wandb and trainer.accelerator.is_main_process:
+    wandb.finish()

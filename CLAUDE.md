@@ -14,14 +14,55 @@ source activate_diffusion_project_env.sh
 
 ```bash
 # Train the model (from repo root)
-accelerate launch foregrounds_diffusion/train.py
+accelerate launch train.py --run-name my_run_v1
+
+# Train with Weights & Biases logging
+accelerate launch train.py --run-name my_run_v1 --wandb
 
 # Sample from a trained checkpoint
 accelerate launch foregrounds_diffusion/sample.py \
-  --checkpoint results/model-14.pt \
-  --batches 5 --batch-size 16 \
+  --checkpoint results/my_run_v1/model-20.pt \
+  --batches 10 --batch-size 16 \
   --output data/low_pass/2mJy/samples.npy
+
+# Sample with Weights & Biases logging
+accelerate launch foregrounds_diffusion/sample.py \
+  --checkpoint results/my_run_v1/model-20.pt \
+  --batches 10 --batch-size 16 \
+  --output data/low_pass/2mJy/samples.npy --wandb
 ```
+
+## SLURM (cluster)
+
+Edit the variables at the top of each script, then submit:
+
+```bash
+sbatch train_slurm.sh    # single GPU, 1-12h wall time
+sbatch sample_slurm.sh   # 4 GPUs, 2h wall time
+```
+
+Key variables in each script:
+
+| Script | Variable | Purpose |
+|---|---|---|
+| `train_slurm.sh` | `RUN_NAME` | Run label; checkpoints go to `results/<RUN_NAME>/` |
+| `train_slurm.sh` | `USE_WANDB` | `true` / `false` — enables `--wandb` flag |
+| `sample_slurm.sh` | `CHECKPOINT` | Path to `.pt` checkpoint to sample from |
+| `sample_slurm.sh` | `OUTPUT` | Output `.npy` path |
+| `sample_slurm.sh` | `BATCHES` / `BATCH_SIZE` | Total samples = `BATCHES × BATCH_SIZE × 4` GPUs |
+| `sample_slurm.sh` | `USE_WANDB` | `true` / `false` — enables `--wandb` flag |
+
+## Weights & Biases
+
+WandB is **opt-in**: pass `--wandb` or set `WANDB=1` in the environment. The API key must be set before running:
+
+```bash
+export WANDB_API_KEY=<your_key>   # add to ~/.bashrc for persistence
+```
+
+When enabled:
+- **Training**: logs `train/loss` per step and CIB/tSZ sample image grids at each checkpoint milestone. WandB project: `cmb_foregrounds_diffusion`.
+- **Sampling**: logs sample images and saves the output `.npy` as a WandB artifact.
 
 ## Architecture
 
@@ -43,8 +84,8 @@ The pipeline is:
 | `masking.py` | Flat-sky peak masks (`get_peak_masks`, `inpaint_masked_regions`, `boundary_apod_mask`, `get_mask_using_gaussian_fitting`) and AGORA MDPL2 cluster/point-source masks (`get_point_source_mask_in_healpix`, `get_apodised_mdpl2_cluster_mask`, etc.) |
 | `peak_counts.py` | Peak and minima counting statistics (Sabyr et al. 2024): `smooth_map`, `find_peaks`, `find_minima`, `count_peaks_binned`, `count_minima_binned`, `compute_peak_minima_counts`. numpy/scipy only. |
 | `scattering_stats.py` | Scattering transform statistics: `compute_scattering_coefficients` (S1, S2), `compute_scattering_covariance` (C11, Cheng et al. backend only), `scattering_summary`. Requires Cheng et al. repo or `kymatio`. |
-| `train.py` | Training entry point (not a library module — run via `accelerate launch`) |
-| `sample.py` | Sampling entry point with CLI (`--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`) |
+| `train.py` | Training entry point (not a library module — run via `accelerate launch`). CLI: `--run-name`, `--steps`, `--batch-size`, `--lr`, `--wandb` |
+| `sample.py` | Sampling entry point. CLI: `--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`, `--wandb` |
 | `redundant/` | Old scripts kept for reference; not part of the active codebase |
 
 ### Key data conventions

@@ -14,8 +14,6 @@ from tqdm import tqdm
 from denoising_diffusion_pytorch import Unet, GaussianDiffusion, Trainer1D, Dataset1D
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch_1d import num_to_groups
 
-import wandb
-
 # ---------------------------------------------------------------------------
 # Trainer with WandB loss logging
 # ---------------------------------------------------------------------------
@@ -50,6 +48,7 @@ class WandbTrainer1D(Trainer1D):
                 pbar.set_description(f'loss: {total_loss:.4f}')
 
                 if log:
+                    import wandb
                     wandb.log({"train/loss": total_loss}, step=self.step)
 
                 accelerator.wait_for_everyone()
@@ -77,6 +76,7 @@ class WandbTrainer1D(Trainer1D):
                         self.save(milestone)
 
                         if log:
+                            import wandb
                             samples_np = all_samples.cpu().numpy()
                             n_show = min(8, len(samples_np))
                             wandb.log({
@@ -220,6 +220,7 @@ print()
 # ---------------------------------------------------------------------------
 
 if use_wandb and trainer.accelerator.is_main_process:
+    import wandb
     wandb.init(
         project="cmb_foregrounds_diffusion",
         name=run_name,
@@ -233,4 +234,5 @@ if use_wandb and trainer.accelerator.is_main_process:
 trainer.train()
 
 if use_wandb and trainer.accelerator.is_main_process:
+    import wandb
     wandb.finish()

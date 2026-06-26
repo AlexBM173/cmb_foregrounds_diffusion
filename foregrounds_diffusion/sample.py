@@ -17,7 +17,6 @@ import numpy as np
 import torch
 from accelerate import Accelerator
 from denoising_diffusion_pytorch import GaussianDiffusion, Unet
-import wandb
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +133,7 @@ def main():
     accelerator = Accelerator(split_batches=True, mixed_precision='fp16')
 
     if use_wandb and accelerator.is_main_process:
+        import wandb
         wandb.init(
             project="cmb_foregrounds_diffusion",
             job_type="sampling",
@@ -162,6 +162,7 @@ def main():
     print(f"Saved {all_samples.shape[0]} samples → {output_path}")
 
     if use_wandb and accelerator.is_main_process:
+        import wandb
         n_show = min(8, len(all_samples))
         wandb.log({
             "samples/cib": [wandb.Image(all_samples[i, 0]) for i in range(n_show)],
@@ -171,6 +172,7 @@ def main():
         artifact = wandb.Artifact("samples", type="dataset")
         artifact.add_file(str(output_path))
         wandb.log_artifact(artifact)
+        import wandb
         wandb.finish()
 
 

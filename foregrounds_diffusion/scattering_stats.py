@@ -86,15 +86,16 @@ def compute_scattering_coefficients(patches_nhw, J=5, L=4, device=None):
     dict with keys:
         ``'S0'`` : ndarray, shape (N, 1)
             Zeroth-order coefficient (mean pixel value).
-        ``'S1'`` : ndarray, shape (N, J, L)
-            First-order scattering coefficients — mean of wavelet modulus
-            at each scale j and orientation l.
-        ``'S2'`` : ndarray, shape (N, J, L, J, L)
-            Second-order scattering coefficients — mean of modulus of
-            modulus at pairs (j1,l1), (j2,l2) with j2 > j1.
-        ``'S1_mean'`` : ndarray, shape (J, L)
+        ``'S1'`` : ndarray, shape (N, J)
+            First-order scattering coefficients, orientation-averaged
+            (``S1_iso`` in Cheng et al. notation).
+        ``'S2'`` : ndarray, shape (N, J, J, L)
+            Second-order scattering coefficients — cross-scale coupling
+            at pairs (j1, j2) as a function of orientation difference l
+            (``S2_iso`` in Cheng et al. notation).
+        ``'S1_mean'`` : ndarray, shape (J,)
             Mean S1 across all N patches.
-        ``'S2_mean'`` : ndarray, shape (J, L, J, L)
+        ``'S2_mean'`` : ndarray, shape (J, J, L)
             Mean S2 across all N patches.
         ``'J'``, ``'L'`` : int
             Parameters used.
@@ -107,14 +108,16 @@ def compute_scattering_coefficients(patches_nhw, J=5, L=4, device=None):
         import torch
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # Cheng et al. Scattering2d uses 'gpu'/'cpu', not 'cuda'
+        cheng_device = 'gpu' if device == 'cuda' else 'cpu'
 
-        st_calc = mod.Scattering2d(M=H, N=W, J=J, L=L, device=device)
-        s_mean = st_calc.scattering_coef_simple(
-            torch.tensor(patches_f32, device=device))
+        st_calc = mod.Scattering2d(M=H, N=W, J=J, L=L, device=cheng_device)
+        # Pass tensor on CPU — the class handles GPU transfer internally
+        s_mean = st_calc.scattering_coef_simple(torch.tensor(patches_f32))
 
-        S0 = s_mean['S0'].cpu().numpy()          # (N, 1)
-        S1 = s_mean['S1'].cpu().numpy()          # (N, J, L)
-        S2 = s_mean['S2'].cpu().numpy()          # (N, J, L, J, L)
+        S0 = s_mean['S0'].cpu().numpy()      # (N, 1)
+        S1 = s_mean['S1_iso'].cpu().numpy()  # (N, J)
+        S2 = s_mean['S2_iso'].cpu().numpy()  # (N, J, J, L)
 
     elif backend == 'kymatio':
         import torch
@@ -129,27 +132,25 @@ def compute_scattering_coefficients(patches_nhw, J=5, L=4, device=None):
             UserWarning)
 
         scattering2d = Scattering2D(J=J, shape=(H, W), L=L)
-        Sx = scattering2d(patches_f32)  # (N, 1+J+J²L², H/2^J, W/2^J)
+        Sx = scattering2d(patches_f32)  # (N, 1+J*L+..., H/2^J, W/2^J)
 
-        # Average over spatial dimensions
+        # Average over spatial dimensions then orientations for S1
         Sx_mean = Sx.mean(axis=(-2, -1))  # (N, n_coeffs)
-
         n0 = 1
-        n1 = J * L
         S0 = Sx_mean[:, :n0]
-        S1 = Sx_mean[:, n0:n0 + n1].reshape(N, J, L)
-        # kymatio returns flattened S2; reshape approximately
-        S2_flat = Sx_mean[:, n0 + n1:]
-        S2 = np.zeros((N, J, L, J, L))
-        # Fill only j2>j1 entries (others remain 0)
+        # kymatio S1: J*L coefficients → average over L to match Cheng S1_iso
+        S1_full = Sx_mean[:, n0:n0 + J * L].reshape(N, J, L)
+        S1 = S1_full.mean(axis=-1)  # (N, J)
+        # S2: fill upper triangle (j1, j2, l=0) as approximation
+        S2_flat = Sx_mean[:, n0 + J * L:]
+        S2 = np.zeros((N, J, J, L))
         idx = 0
         for j1 in range(J):
-            for l1 in range(L):
-                for j2 in range(j1 + 1, J):
-                    for l2 in range(L):
-                        if idx < S2_flat.shape[1]:
-                            S2[:, j1, l1, j2, l2] = S2_flat[:, idx]
-                            idx += 1
+            for j2 in range(j1 + 1, J):
+                for l in range(L):
+                    if idx < S2_flat.shape[1]:
+                        S2[:, j1, j2, l] = S2_flat[:, idx]
+                        idx += 1
 
     return {
         'S0': S0,
@@ -201,11 +202,11 @@ def compute_scattering_covariance(patches_nhw, J=5, L=4, device=None):
     N, H, W = patches_nhw.shape
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    cheng_device = 'gpu' if device == 'cuda' else 'cpu'
 
     patches_f32 = patches_nhw.astype(np.float32)
-    st_calc = scattering.Scattering2d(M=H, N=W, J=J, L=L, device=device)
-    s_cov = st_calc.scattering_cov(
-        torch.tensor(patches_f32, device=device))
+    st_calc = scattering.Scattering2d(M=H, N=W, J=J, L=L, device=cheng_device)
+    s_cov = st_calc.scattering_cov(torch.tensor(patches_f32))
 
     # Move all tensors to CPU numpy
     return {k: v.cpu().numpy() if hasattr(v, 'cpu') else v
@@ -234,17 +235,16 @@ def scattering_summary(coeffs, scale_idx=None):
         Flattened scattering features per map.
     """
     J = coeffs['J']
-    L = coeffs['L']
     scales = scale_idx if scale_idx is not None else list(range(J))
 
-    S1 = coeffs['S1'][:, scales, :]          # (N, n_scales, L)
-    # S2 upper triangle j2 > j1
+    S1 = coeffs['S1'][:, scales]             # (N, n_scales)
+    # S2 upper triangle j2 > j1, all orientation differences
     S2_list = []
     for j1 in scales:
         for j2 in range(j1 + 1, J):
-            S2_list.append(coeffs['S2'][:, j1, :, j2, :].reshape(len(S1), -1))
+            S2_list.append(coeffs['S2'][:, j1, j2, :])  # (N, L)
 
-    parts = [S1.reshape(len(S1), -1)]
+    parts = [S1]
     if S2_list:
         parts.append(np.concatenate(S2_list, axis=1))
 

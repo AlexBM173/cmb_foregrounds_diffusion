@@ -1,9 +1,11 @@
 # Development Plan
 
-Four-phase plan covering a full test suite, code optimisation, public documentation,
-and package distribution. Each phase is largely independent, though Phase 1 (tests)
-should precede Phase 3 (optimisations) so regressions are caught automatically, and
-Phase 3 (docs) should be reasonably complete before Phase 4 (PyPI).
+Six-phase plan covering a full test suite, profiling and optimisation, parallelisation,
+public documentation, package distribution, and CI/CD. Phases are largely independent,
+with the following ordering constraints:
+- Phase 1 (tests) should precede Phase 2 (profiling) so regressions are caught during optimisation
+- Phase 2 baseline measurements should be complete before Phase 3 (parallelisation) benchmarks are run
+- Phase 4 (docs) should be reasonably complete before Phase 5 (PyPI)
 
 ---
 
@@ -474,9 +476,438 @@ by more than 20% against the saved baseline.
 
 ---
 
-## Phase 3 — Documentation and ReadTheDocs
+## Phase 3 — Parallelisation
 
-### 3.1 Docstring audit
+The evaluation pipeline is embarrassingly parallel over N maps on the CPU side,
+and the training/sampling pipeline already uses `accelerate` for multi-GPU. This
+phase documents where parallelism applies, how to implement it at each scope level
+(process, node, cluster), and how to benchmark the gains alongside the single-core
+results from Phase 2.
+
+---
+
+### 3.1 Parallelism landscape
+
+| Scope | Tool | Best for |
+|---|---|---|
+| Single node, multi-core (CPU) | `joblib.Parallel` | Any loop over N maps |
+| Single node, multi-GPU | `torch.multiprocessing` / `accelerate` | GPU statistics, sampling |
+| Multi-node, no shared memory | `mpi4py` | Large-scale evaluation across nodes |
+| Multi-node, deep learning | `accelerate` + DeepSpeed ZeRO | Multi-node training |
+| Coarse-grained cluster tasks | SLURM array jobs | Evaluation over many checkpoints/seeds |
+| Async I/O overlap | `DataLoader(num_workers=N)` | Training data pipeline |
+
+---
+
+### 3.2 Embarrassingly parallel CPU functions
+
+The following functions are independent per map and have no inter-map communication.
+They can all be parallelised with the same pattern: chunk the N axis, process each
+chunk in a separate worker, concatenate results.
+
+| Function | Output shape | Merge strategy |
+|---|---|---|
+| `compute_minkowski_tensors` | `(N, T)` per tensor type | `np.concatenate` along axis 0 |
+| `compute_mfs` | `(N, T, 3)` | `np.concatenate` along axis 0 |
+| `compute_cross_moments` | `(N, B, 12)` | `np.concatenate` along axis 0 |
+| `compute_summed_moments` | `(N, B, 3)` | `np.concatenate` along axis 0 |
+| `mean_cls` (per-map spectra) | `(N, n_bins)` | `np.concatenate`, then `np.mean` |
+| `compute_peak_minima_counts` | `(N, n_scales, n_thresholds)` | `np.concatenate` along axis 0 |
+| `smooth_map` | `(H, W)` | applied per map, no merge needed |
+| `extract_cutouts` | `(M, size, size)` | `np.concatenate` along axis 0 |
+
+**Canonical joblib pattern:**
+
+```python
+from joblib import Parallel, delayed
+import numpy as np
+
+def _chunk(arr, n_jobs):
+    k, rem = divmod(len(arr), n_jobs)
+    return [arr[i*k + min(i,rem):(i+1)*k + min(i+1,rem)] for i in range(n_jobs)]
+
+def parallel_minkowski_tensors(maps_nhw, norm_fn, thresholds, n_jobs=-1):
+    chunks = _chunk(maps_nhw, n_jobs if n_jobs > 0 else cpu_count())
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(compute_minkowski_tensors)(chunk, norm_fn, thresholds)
+        for chunk in chunks
+    )
+    # results is a list of dicts; merge tensor-by-tensor
+    merged = {}
+    for tensor_key in results[0]:
+        merged[tensor_key] = {
+            stat: np.concatenate([r[tensor_key][stat] for r in results], axis=0)
+            for stat in results[0][tensor_key]
+        }
+    return merged
+```
+
+Set `n_jobs=-1` to use all physical cores. Use `backend="loky"` (default) for
+CPU-bound tasks; use `backend="threading"` only when the function releases the GIL
+(e.g. pure NumPy/SciPy code).
+
+**Add `n_jobs` parameter to each function** in the public API so users can opt in
+without importing `joblib` directly:
+
+```python
+def compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, n_jobs=1):
+    if n_jobs != 1:
+        return _parallel_minkowski_tensors(maps_nhw, norm_fn, thresholds, n_jobs)
+    # existing single-threaded implementation ...
+```
+
+The default `n_jobs=1` preserves current behaviour; no code that uses the function
+needs to change.
+
+---
+
+### 3.3 GPU acceleration for statistics
+
+Several CPU-bound functions can be ported to PyTorch to exploit GPU parallelism.
+The key criterion is whether the cost of transferring data to/from the GPU is
+amortised across the batch — worth it for N ≥ 50 on 256² maps.
+
+**`map2cl` → `torch.fft.rfft2`**
+
+```python
+import torch
+
+def map2cl_torch(maps_nhw: torch.Tensor, lbin_idx, n_bins):
+    # maps_nhw: (N, H, W) on GPU
+    fft = torch.fft.rfft2(maps_nhw)                  # (N, H, W//2+1) complex
+    power = (fft.real**2 + fft.imag**2)              # (N, H, W//2+1)
+    cl = torch.zeros(maps_nhw.shape[0], n_bins, device=maps_nhw.device)
+    cl.scatter_add_(1, lbin_idx.expand(maps_nhw.shape[0], -1),
+                    power.reshape(maps_nhw.shape[0], -1))
+    return cl / bin_counts                             # normalise by hits per bin
+```
+
+This computes all N power spectra in a single batched FFT call — O(N) GPU launches
+vs O(N) Python iterations in the CPU version.
+
+**Minkowski tensor binarisation on GPU**
+
+The threshold broadcast `maps_nhw[:, None] > thresholds[None, :, None, None]` is
+already vectorisable; running it on a GPU tensor gives a (N, T, H, W) bool array
+in microseconds.
+
+**Scattering transforms** (`scattering_stats.py`) are already torch-based and
+benefit from GPU automatically; no changes needed.
+
+---
+
+### 3.4 Multi-GPU on a single node (evaluation)
+
+For evaluation runs on a single 4-GPU node (as available on CSD3 Ampere nodes),
+distribute N maps across GPUs with `torch.multiprocessing`:
+
+```python
+import torch.multiprocessing as mp
+
+def _worker(rank, maps_chunk, result_queue, fn, kwargs):
+    device = torch.device(f"cuda:{rank}")
+    out = fn(torch.tensor(maps_chunk, device=device), **kwargs)
+    result_queue.put((rank, out.cpu().numpy()))
+
+def multi_gpu_eval(maps_nhw, fn, n_gpus=4, **kwargs):
+    chunks = np.array_split(maps_nhw, n_gpus)
+    ctx = mp.get_context("spawn")
+    q = ctx.Queue()
+    procs = [ctx.Process(target=_worker, args=(i, chunks[i], q, fn, kwargs))
+             for i in range(n_gpus)]
+    for p in procs: p.start()
+    results = [q.get() for _ in procs]
+    for p in procs: p.join()
+    results.sort(key=lambda x: x[0])
+    return np.concatenate([r for _, r in results], axis=0)
+```
+
+**Alternatively, use `accelerate` for evaluation** — it handles device placement,
+gather/scatter, and mixed precision automatically:
+
+```python
+from accelerate import Accelerator
+
+accelerator = Accelerator()
+dataset = MapDataset(maps_nhw)
+loader  = DataLoader(dataset, batch_size=32)
+loader  = accelerator.prepare(loader)
+
+all_results = []
+for batch in loader:
+    out = compute_statistic(batch)           # runs on accelerator.device
+    all_results.append(accelerator.gather(out))
+results = torch.cat(all_results).cpu().numpy()
+```
+
+This approach works identically on 1, 4, or 32 GPUs without code changes —
+only the `accelerate config` needs updating.
+
+---
+
+### 3.5 Multi-node parallelism with `mpi4py`
+
+For analysis across O(1000) maps distributed over multiple CSD3 nodes, use MPI
+via `mpi4py`. The pattern is: rank 0 holds all maps and scatters chunks; each rank
+computes its local statistics; rank 0 gathers and merges.
+
+**Install:**
+```bash
+pip install mpi4py   # uses the system MPI; on CSD3, module load openmpi/4.1 first
+```
+
+**Generic scatter–compute–gather wrapper:**
+
+```python
+from mpi4py import MPI
+import numpy as np
+
+def mpi_parallel_eval(maps_nhw, fn, **kwargs):
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
+    # Rank 0 scatters map chunks
+    if rank == 0:
+        chunks = np.array_split(maps_nhw, size)
+        # pad to equal length so scatter works
+        max_len = max(len(c) for c in chunks)
+        chunks = [np.pad(c, ((0, max_len - len(c)), (0,0), (0,0))) for c in chunks]
+        true_lens = [len(np.array_split(maps_nhw, size)[i]) for i in range(size)]
+    else:
+        chunks = None
+        true_lens = None
+
+    local_chunk = comm.scatter(chunks, root=0)
+    true_len    = comm.scatter(true_lens, root=0)
+    local_result = fn(local_chunk[:true_len], **kwargs)
+
+    all_results = comm.gather(local_result, root=0)
+
+    if rank == 0:
+        return _merge(all_results)   # concatenate along N axis
+```
+
+**Run with `mpirun` on a single node:**
+```bash
+mpirun -n 4 python eval_mpi.py
+```
+
+**Run across multiple CSD3 nodes via SLURM:**
+```bash
+#SBATCH --nodes=4
+#SBATCH --ntasks-per-node=1      # 1 MPI rank per node (use CPU cores within each via joblib)
+srun python eval_mpi.py
+```
+
+Combine MPI across nodes with `joblib` within each node (§3.2) for a hybrid
+parallelism strategy: `n_nodes × n_cores_per_node` total workers.
+
+---
+
+### 3.6 Multi-node training with DeepSpeed
+
+Current training uses single-node, single-GPU (`accelerate launch --num_processes 1`).
+Scale to multi-node with DeepSpeed ZeRO-2 (optimizer state partitioning, no parameter
+sharding needed at this model size):
+
+**`accelerate config` for multi-node:**
+```yaml
+compute_environment: LOCAL_MACHINE
+distributed_type: DEEPSPEED
+deepspeed_config:
+  deepspeed_multinode_launcher: standard
+  gradient_accumulation_steps: 1
+  zero_optimization:
+    stage: 2
+    allgather_partitions: true
+    reduce_scatter: true
+    overlap_comm: true
+num_machines: 4
+num_processes: 16   # 4 nodes × 4 GPUs each
+machine_rank: 0     # override per node via SLURM env var
+main_process_ip: <head_node_ip>
+main_process_port: 29500
+```
+
+**`train_slurm_multinode.sh`:**
+```bash
+#!/bin/bash
+#SBATCH --job-name=cmb_multinode
+#SBATCH --account=mphil-dis-sl2-gpu
+#SBATCH --nodes=4
+#SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:4
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=128G
+#SBATCH --time=2-00:00:00
+#SBATCH --partition=ampere
+
+RUN_NAME="multinode_run_v1"
+HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
+
+srun accelerate launch \
+    --num_processes 16 \
+    --num_machines 4 \
+    --machine_rank $SLURM_NODEID \
+    --main_process_ip $HEAD_NODE \
+    --main_process_port 29500 \
+    --deepspeed_config_file deepspeed_config.json \
+    train.py --run-name "$RUN_NAME"
+```
+
+The key `srun` invocation launches one `accelerate` process per task; SLURM
+populates `$SLURM_NODEID` automatically for each node in the allocation.
+
+At this model size (U-Net, dim=64), multi-node training is not essential for
+convergence speed — but it becomes beneficial when experimenting with `dim=128`
+or larger patch sizes.
+
+---
+
+### 3.7 SLURM array jobs for coarse-grained evaluation
+
+For tasks that are independent across checkpoints, seeds, or dataset splits, SLURM
+array jobs are the simplest parallelisation with no code changes beyond reading
+`$SLURM_ARRAY_TASK_ID`.
+
+**`eval_slurm_array.sh` — evaluate statistics across multiple checkpoints:**
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=cmb_eval
+#SBATCH --account=mphil-dis-sl2-gpu
+#SBATCH --array=0-9              # 10 checkpoints in parallel
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=64G
+#SBATCH --time=02:00:00
+#SBATCH --partition=ampere
+#SBATCH --output=logs/eval_%A_%a.out
+#SBATCH --error=logs/eval_%A_%a.err
+
+TASK_ID=$SLURM_ARRAY_TASK_ID
+CHECKPOINT="results/run_v1/model-$((TASK_ID * 5 + 5)).pt"   # checkpoints 5, 10, ..., 50
+OUTPUT="results/eval/stats_milestone_${TASK_ID}.npz"
+
+source ~/diffusion_project_env/bin/activate
+python foregrounds_diffusion/eval.py \
+    --checkpoint "$CHECKPOINT" \
+    --output "$OUTPUT" \
+    --n-jobs 16
+```
+
+Collect results after all array tasks complete:
+```python
+import numpy as np, glob
+files = sorted(glob.glob("results/eval/stats_milestone_*.npz"))
+all_stats = [np.load(f) for f in files]
+```
+
+---
+
+### 3.8 Training data pipeline
+
+Within training, I/O is rarely the bottleneck at 256² patches but can become one
+at larger sizes or on slow shared filesystems.
+
+**Overlapping I/O with GPU compute:**
+```python
+DataLoader(
+    dataset,
+    batch_size=batch_size,
+    num_workers=8,          # 8 background processes preload batches
+    pin_memory=True,        # allocate in pinned (page-locked) host memory for fast H2D
+    prefetch_factor=2,      # keep 2 batches queued per worker
+    persistent_workers=True # keep worker processes alive between epochs
+)
+```
+
+**Lustre striping on CSD3** (relevant if data lives on `/rds/` or `/sptlocal/`):
+```bash
+lfs setstripe -c 4 data/low_pass/   # stripe across 4 OSTs for parallel reads
+```
+This pre-fragments the `.npy` files across storage servers so multiple workers
+can read simultaneously without contention.
+
+---
+
+### 3.9 Parallelisation benchmarks
+
+Extend `docs/tutorials/13_benchmarks.ipynb` with a Section 8 covering parallel
+scaling. New figures to add:
+
+**Figure 11 — Strong scaling: time vs n_workers (fixed N=500, 256²)**
+```
+x-axis: number of workers (1, 2, 4, 8, 16, 32)
+y-axis: wall-clock time (seconds)
+series: compute_minkowski_tensors, compute_cross_moments, compute_peak_minima_counts
+reference line: ideal linear speedup (t₁ / n_workers)
+```
+Strong scaling efficiency = (t₁ / (n × tₙ)) × 100%. Efficiency >80% at 8 workers
+is a reasonable target for these functions; expect degradation above 16 due to
+process spawn overhead and memory bandwidth saturation.
+
+**Figure 12 — Weak scaling: time vs n_workers (fixed N=50 maps per worker)**
+```
+x-axis: number of workers (1, 2, 4, 8, 16)
+y-axis: wall-clock time (seconds), should be flat for ideal scaling
+series: same functions as Figure 11
+annotation: +10% and +20% tolerance bands
+```
+
+**Figure 13 — Communication overhead fraction**
+```
+For MPI runs (multi-node):
+x-axis: number of nodes (1, 2, 4, 8)
+y-axis: fraction of total time spent in scatter/gather (not compute)
+annotation: target <10% for this workload
+```
+
+**Figure 14 — GPU vs CPU speedup for torch-ported functions**
+```
+x-axis: N (number of maps)
+y-axis: CPU time / GPU time
+series: map2cl_torch, compute_minkowski_tensors (after GPU port)
+annotation: PCIe transfer breakeven point
+dashed: speedup = 1 (breakeven)
+```
+
+**Figure 15 — Multi-GPU evaluation throughput (maps per second)**
+```
+x-axis: number of GPUs (1, 2, 4)
+y-axis: maps processed per second
+series: per-function throughput
+```
+
+Also add a **parallel scaling summary table** to the benchmark notebook:
+
+| Function | Serial (N=500) | 8 cores | 4 GPUs | Strong eff. @8 | Notes |
+|---|---|---|---|---|---|
+| `compute_minkowski_tensors` | | | | | |
+| `compute_cross_moments` | | | | | |
+| `map2cl` | | | | | |
+| `compute_peak_minima_counts` | | | | | |
+
+---
+
+### 3.10 Implementation order
+
+1. Add `n_jobs` parameter to all functions in §3.2 (one PR per module)
+2. Benchmark `joblib` parallel on local machine (Figure 11, 12)
+3. Port `map2cl` to torch; benchmark GPU speedup (Figure 14)
+4. Write `mpi4py` wrapper and test on 2 CSD3 nodes (Figure 13)
+5. Write `eval_slurm_array.sh` and validate with 3 checkpoints
+6. Add `train_slurm_multinode.sh` and `deepspeed_config.json`; validate on 2 nodes
+7. Benchmark multi-GPU evaluation (Figure 15)
+
+---
+
+## Phase 4 — Documentation and ReadTheDocs
+
+### 4.1 Docstring audit
 
 All public functions should have NumPy-style docstrings covering:
 - One-line summary
@@ -487,7 +918,7 @@ All public functions should have NumPy-style docstrings covering:
 Priority order: `flatmaps` → `preprocessing` → `moments` → `morphology` → `masking`.
 `statistics`, `stacking`, `peak_counts` are already reasonably documented.
 
-### 3.2 Sphinx setup
+### 4.2 Sphinx setup
 
 ```
 docs/
@@ -527,7 +958,7 @@ sphinx-copybutton
 sphinx-autodoc-typehints
 ```
 
-### 3.3 ReadTheDocs configuration
+### 4.3 ReadTheDocs configuration
 
 **`.readthedocs.yaml`** (repo root):
 ```yaml
@@ -556,7 +987,7 @@ docs = ["sphinx>=7", "furo", "nbsphinx", "sphinx-copybutton",
         "sphinx-autodoc-typehints", "ipykernel"]
 ```
 
-### 3.4 ReadTheDocs setup steps
+### 4.4 ReadTheDocs setup steps
 
 1. Push `.readthedocs.yaml` and `docs/conf.py` to GitHub
 2. Go to readthedocs.org → Import project → connect `AlexBM173/cmb_foregrounds_diffusion`
@@ -564,7 +995,7 @@ docs = ["sphinx>=7", "furo", "nbsphinx", "sphinx-copybutton",
 4. Trigger first build; fix any autodoc import errors (common: missing optional deps)
 5. Add RTD badge to `README.md`
 
-### 3.5 Content plan
+### 4.5 Content plan
 
 | Page | Source |
 |---|---|
@@ -577,9 +1008,9 @@ docs = ["sphinx>=7", "furo", "nbsphinx", "sphinx-copybutton",
 
 ---
 
-## Phase 4 — Distribution and PyPI
+## Phase 5 — Distribution and PyPI
 
-### 4.1 Source distribution and wheels
+### 5.1 Source distribution and wheels
 
 **Source distribution (sdist):** a `.tar.gz` of the source tree — what pip uses when
 no pre-built wheel is available for the target platform.
@@ -595,7 +1026,7 @@ pip install build
 python -m build          # produces dist/foregrounds_diffusion-*.tar.gz and *.whl
 ```
 
-### 4.2 `pyproject.toml` audit
+### 5.2 `pyproject.toml` audit
 
 Before publishing, ensure `pyproject.toml` is complete:
 
@@ -643,7 +1074,7 @@ the version from git tags:
 ```
 Then `git tag v0.1.0 && git push --tags` drives the release version automatically.
 
-### 4.3 Wheel building with `cibuildwheel` (if Cython is added)
+### 5.3 Wheel building with `cibuildwheel` (if Cython is added)
 
 Pure-Python: skip this — the single `py3-none-any` wheel works everywhere.
 
@@ -659,7 +1090,7 @@ With Cython extensions, add to `.github/workflows/publish.yml`:
     CIBW_ARCHS_MACOS: "arm64 x86_64"
 ```
 
-### 4.4 TestPyPI before production
+### 5.4 TestPyPI before production
 
 Always do a dry run on TestPyPI first:
 ```bash
@@ -669,7 +1100,7 @@ pip install --index-url https://test.pypi.org/simple/ foregrounds-diffusion
 ```
 Verify the install works cleanly before uploading to production PyPI.
 
-### 4.5 PyPI publish via GitHub Actions
+### 5.5 PyPI publish via GitHub Actions
 
 Create a PyPI API token (pypi.org → Account settings → API tokens), store it as
 `PYPI_API_TOKEN` in the GitHub repo secrets, then add:
@@ -702,7 +1133,7 @@ jobs:
 **Trusted Publisher** (OIDC) is preferred over API tokens — it is more secure
 because no long-lived secret is stored in GitHub.
 
-### 4.6 Release workflow
+### 5.6 Release workflow
 
 1. Merge all changes to `main`; confirm tests pass
 2. `git tag v0.1.0 && git push --tags`
@@ -713,14 +1144,14 @@ because no long-lived secret is stored in GitHub.
 
 ---
 
-## Phase 5 — CI/CD Pipeline
+## Phase 6 — CI/CD Pipeline
 
-### 5.1 Current state
+### 6.1 Current state
 
 The `.github/workflows/tests.yml` stub from Phase 1 covers the basics. The full
 pipeline below replaces and extends it.
 
-### 5.2 Recommended workflow files
+### 6.2 Recommended workflow files
 
 ```
 .github/workflows/
@@ -729,7 +1160,7 @@ pipeline below replaces and extends it.
   publish.yml      # build and publish to PyPI on version tag
 ```
 
-### 5.3 `tests.yml` — test suite on push/PR
+### 6.3 `tests.yml` — test suite on push/PR
 
 ```yaml
 name: Tests
@@ -757,7 +1188,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 ```
 
-### 5.4 `lint.yml` — code quality on push/PR
+### 6.4 `lint.yml` — code quality on push/PR
 
 ```yaml
 name: Lint
@@ -776,7 +1207,7 @@ jobs:
       - run: mypy foregrounds_diffusion/ --ignore-missing-imports
 ```
 
-### 5.5 Additional CI/CD improvements (suggested)
+### 6.5 Additional CI/CD improvements (suggested)
 
 The items below are ordered from most to least impactful for a research codebase.
 
@@ -855,11 +1286,16 @@ Catches lint errors locally before they reach CI, keeping the feedback loop tigh
 
 1. **CI foundation** — `tests.yml` + `lint.yml` + branch protection. Low effort, high value.
 2. **Tests** — write `conftest.py` and unit tests for `flatmaps`, `moments`, `morphology`.
-3. **Docstring audit** — prerequisite for useful API docs.
-4. **Sphinx + RTD skeleton** — get a basic build passing; RTD auto-updates on push from this point.
-5. **`pyproject.toml` audit + TestPyPI** — dry-run the publish workflow.
-6. **Optimisations** — profile first, then JIT; benchmark CI to guard regressions.
-7. **PyPI publish** — tag `v0.1.0`; set up Trusted Publisher; release.
-8. **Cython** — only if Numba JIT is insufficient.
-9. **Additional CI items** — add dependency pinning, notebook smoke tests, `towncrier`
-   incrementally as the project matures.
+3. **Baseline profiling** — run §2.2 sweeps and produce Figures 1–4; record in benchmark notebook.
+4. **Single-core optimisations** — Numba JIT, NumPy vectorisation, cKDTree; re-profile for Figures 5–9.
+5. **`n_jobs` parallelisation** — add to all functions in §3.2; produce strong/weak scaling plots (Figures 11–12).
+6. **GPU ports** — `map2cl_torch` and minkowski binarisation; produce Figure 14.
+7. **MPI wrapper + eval SLURM array job** — test on 2 CSD3 nodes; produce Figure 13.
+8. **Multi-node training SLURM script** — validate on 2 nodes; only if single-node training is the bottleneck.
+9. **Docstring audit** — prerequisite for useful API docs.
+10. **Sphinx + RTD skeleton** — get a basic build passing; RTD auto-updates on push from this point.
+11. **`pyproject.toml` audit + TestPyPI** — dry-run the publish workflow.
+12. **PyPI publish** — tag `v0.1.0`; set up Trusted Publisher; release.
+13. **Cython** — only if Numba JIT is insufficient.
+14. **Additional CI items** — add dependency pinning, notebook smoke tests, `towncrier`
+    incrementally as the project matures.

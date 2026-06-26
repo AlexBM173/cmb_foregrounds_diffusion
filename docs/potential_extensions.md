@@ -122,12 +122,33 @@ Extensions are grouped by theme, roughly ordered from most to least directly tra
 
 ---
 
-## 10. Wavelet Scattering Transform as an Additional Validation Statistic
+## 10. Wavelet Scattering Transform as an Additional Validation Statistic ✓ *Implemented*
 
 **Motivation:** The paper validates against power spectra, histograms, Minkowski functionals, and collapsed bispectra/trispectra. Wavelet scattering transforms (WST) are sensitive to multi-scale non-Gaussian structure in a way that is complementary to the harmonic-space moment approach and have been applied to CMB and large-scale structure analyses.
 
-**Approach:** Use the `kymatio` Python library to compute WST coefficients for Agora, DDPM, and Gaussian patches. The first-order coefficients capture scale-dependent power; second-order coefficients capture coupling between scales, probing non-Gaussianity in a similar spirit to the bispectrum but in a more physically interpretable basis.
+**Implementation:** `foregrounds_diffusion/scattering_stats.py` — `compute_scattering_coefficients` (S1: N×J orientation-averaged, S2: N×J×J×L cross-scale coupling), `compute_scattering_covariance` (C11, Cheng et al. backend only), `scattering_summary` (flattened feature vector). Uses the Cheng et al. `scattering_transform` repo (cloned to project root) with `kymatio` as a fallback. See `docs/tutorials/11_scattering_transforms.ipynb` for the full comparison against Agora, DDPM, and Gaussian baseline.
 
-**Starting point:** `docs/tutorials/08_morphology_and_histograms.ipynb` — add WST as a third statistic alongside histograms and Minkowski functionals.
+**Remaining work:** Run on the full test set (100+ maps) and interpret the S2 cross-scale ratio matrix — deviations from 1 in the DDPM/Agora ratio identify which scale pairs the model fails to reproduce. C11 scattering covariance is available but not yet analysed.
 
 **Obstacle:** WST coefficient interpretation is less established in the CMB foreground literature than power spectra or bispectra, making it harder to relate findings back to physical quantities. It is primarily useful as an additional empirical check rather than a physically motivated diagnostic.
+
+---
+
+## 11. Minkowski Tensors as a Morphological Anisotropy Statistic ✓ *Implemented*
+
+**Motivation:** The scalar Minkowski functionals in Figure 6 measure area (M0), perimeter (M1), and Euler characteristic (M2) of excursion sets but discard all directional information. Minkowski tensors are rank-2 tensorial generalisations that additionally encode the *anisotropy* and *orientation* of morphological features — cluster boundary shapes, filament directions — providing a sensitive test of whether the DDPM reproduces the full geometry of the foreground fields, not just their scalar topology.
+
+**Implementation:** `foregrounds_diffusion/statistics.py` — `compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, tensor_types, centred)` returns β = λ_min/λ_max ∈ [0, 1] (anisotropy index) and θ (major-axis orientation) per map per threshold, for three tensor types:
+- **W012** (W^{0,2}_1): boundary normal tensor via Sobel-estimated outward normals n⊗n. Probes isotropy of cluster boundary shapes. Recommended default.
+- **W200** (W^{2,0}_0): area inertia tensor r⊗r over interior pixels. Measures elongation of filled excursion regions.
+- **W201** (W^{2,0}_1): boundary position tensor r⊗r over boundary pixels. Hybrid sensitivity.
+
+See `docs/tutorials/12_minkowski_tensors.ipynb` for β(ν) curves (2×3 grid across channels and tensor types), polar θ histograms, and DDPM/Agora residuals.
+
+**Remaining work:** Run the tutorial on the full test set, choose the most informative tensor type(s) for the specific CIB/tSZ morphology, and determine whether the DDPM reproduces the anisotropy of tSZ clusters (which are expected to be mildly anisotropic due to filamentary infall) versus CIB (which should be closer to isotropic on average). A joint CIB×tSZ tensor (cross-channel anisotropy alignment) could be a further extension.
+
+**Starting point:** `docs/tutorials/12_minkowski_tensors.ipynb` — fully runnable; choose between W012/W200/W201 based on the β(ν) plot output.
+
+**Obstacle:** Sobel-based normal estimation has O(1 pixel) error on sharp boundaries; this is negligible for the 256×256 patches in use but could matter for very small excursion sets (ν near 0.95). Smoothing the binary mask before gradient estimation is a simple fix if needed. Interpretation requires care at extreme thresholds where excursion sets are nearly empty or nearly full — those entries are already masked to β = 1 in the implementation.
+
+**Reference:** Schroder-Turk et al. (2013), *New J. Phys.* 15 083028.

@@ -1,8 +1,9 @@
 # Development Plan
 
-Three-phase plan covering a full test suite, code optimisation, and public documentation.
-Each phase is independent and can be started in any order, though Phase 1 (tests) should
-ideally precede Phase 3 (optimisations) so regressions are caught automatically.
+Four-phase plan covering a full test suite, code optimisation, public documentation,
+and package distribution. Each phase is largely independent, though Phase 1 (tests)
+should precede Phase 3 (optimisations) so regressions are caught automatically, and
+Phase 3 (docs) should be reasonably complete before Phase 4 (PyPI).
 
 ---
 
@@ -101,29 +102,6 @@ ideally precede Phase 3 (optimisations) so regressions are caught automatically.
 **`test_preprocessing_pipeline.py`**
 - Synthetic `(8, 64, 64, 2)` array through normalisation → augmentation → DataLoader
 - Assert augmented count = 64, dtype float32, values in expected range
-
-### 1.4 CI (GitHub Actions)
-
-```yaml
-# .github/workflows/tests.yml
-on: [push, pull_request]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install -e ".[dev]"
-      - run: pytest tests/ -v --cov=foregrounds_diffusion --cov-report=xml
-      - uses: codecov/codecov-action@v4
-```
-
-Add `[dev]` optional dependency group to `pyproject.toml`:
-```toml
-[project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "codecov"]
-```
 
 ---
 
@@ -288,6 +266,10 @@ sphinx:
   configuration: docs/conf.py
 ```
 
+RTD rebuilds automatically on every push to `main` via a GitHub webhook that RTD
+installs when you connect the repo. No extra CI step is needed — RTD polls GitHub
+or receives the webhook and triggers its own build pipeline.
+
 Add `[docs]` optional dependency group to `pyproject.toml`:
 ```toml
 [project.optional-dependencies]
@@ -299,7 +281,7 @@ docs = ["sphinx>=7", "furo", "nbsphinx", "sphinx-copybutton",
 
 1. Push `.readthedocs.yaml` and `docs/conf.py` to GitHub
 2. Go to readthedocs.org → Import project → connect `AlexBM173/cmb_foregrounds_diffusion`
-3. Set default branch to `main`
+3. Set default branch to `main`; enable "build on every push"
 4. Trigger first build; fix any autodoc import errors (common: missing optional deps)
 5. Add RTD badge to `README.md`
 
@@ -316,13 +298,289 @@ docs = ["sphinx>=7", "furo", "nbsphinx", "sphinx-copybutton",
 
 ---
 
+## Phase 4 — Distribution and PyPI
+
+### 4.1 Source distribution and wheels
+
+**Source distribution (sdist):** a `.tar.gz` of the source tree — what pip uses when
+no pre-built wheel is available for the target platform.
+
+**Wheel (bdist_wheel):** a pre-built `.whl` archive. For pure-Python packages (no
+Cython) this is a single `py3-none-any` wheel. If Cython extensions are added
+(Phase 2.4), platform-specific wheels (`linux_x86_64`, `macosx_arm64`, etc.) must
+be built separately — use `cibuildwheel` for this (see §4.3).
+
+Build both with:
+```bash
+pip install build
+python -m build          # produces dist/foregrounds_diffusion-*.tar.gz and *.whl
+```
+
+### 4.2 `pyproject.toml` audit
+
+Before publishing, ensure `pyproject.toml` is complete:
+
+```toml
+[project]
+name = "foregrounds-diffusion"
+version = "0.1.0"                        # or use dynamic versioning (see below)
+description = "Denoising diffusion models for correlated CMB foreground simulation"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Alexander Blake Martin", email = "alexbm173@gmail.com" }]
+requires-python = ">=3.11"
+keywords = ["CMB", "diffusion models", "astrophysics", "foregrounds"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.10",
+    "torch>=2.0",
+    "healpy",
+    "denoising-diffusion-pytorch",
+    "accelerate",
+]
+
+[project.optional-dependencies]
+dev  = ["pytest", "pytest-cov"]
+docs = ["sphinx>=7", "furo", "nbsphinx", "sphinx-copybutton",
+        "sphinx-autodoc-typehints", "ipykernel"]
+fast = ["numba", "quantimpy"]            # optional performance/feature extras
+
+[project.urls]
+Homepage      = "https://github.com/AlexBM173/cmb_foregrounds_diffusion"
+Documentation = "https://cmb-foregrounds-diffusion.readthedocs.io"
+Repository    = "https://github.com/AlexBM173/cmb_foregrounds_diffusion"
+```
+
+**Dynamic versioning** (recommended over hardcoding): use `setuptools-scm` to derive
+the version from git tags:
+```toml
+[tool.setuptools_scm]   # version = git tag, e.g. v0.1.0
+```
+Then `git tag v0.1.0 && git push --tags` drives the release version automatically.
+
+### 4.3 Wheel building with `cibuildwheel` (if Cython is added)
+
+Pure-Python: skip this — the single `py3-none-any` wheel works everywhere.
+
+With Cython extensions, add to `.github/workflows/publish.yml`:
+```yaml
+- uses: pypa/cibuildwheel@v2
+  with:
+    package-dir: .
+    output-dir: dist
+  env:
+    CIBW_BUILD: "cp311-*"
+    CIBW_ARCHS_LINUX: "x86_64"
+    CIBW_ARCHS_MACOS: "arm64 x86_64"
+```
+
+### 4.4 TestPyPI before production
+
+Always do a dry run on TestPyPI first:
+```bash
+pip install twine
+twine upload --repository testpypi dist/*
+pip install --index-url https://test.pypi.org/simple/ foregrounds-diffusion
+```
+Verify the install works cleanly before uploading to production PyPI.
+
+### 4.5 PyPI publish via GitHub Actions
+
+Create a PyPI API token (pypi.org → Account settings → API tokens), store it as
+`PYPI_API_TOKEN` in the GitHub repo secrets, then add:
+
+```yaml
+# .github/workflows/publish.yml
+name: Publish to PyPI
+on:
+  push:
+    tags: ["v*"]          # triggers on git tag v0.1.0, v0.2.0, etc.
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi                    # requires manual approval in GitHub UI
+    permissions:
+      id-token: write                    # for Trusted Publisher (no token needed)
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }         # needed for setuptools-scm
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        # uses OIDC Trusted Publisher — no API token secret required
+        # set up at pypi.org → Publishing → Add a pending publisher
+```
+
+**Trusted Publisher** (OIDC) is preferred over API tokens — it is more secure
+because no long-lived secret is stored in GitHub.
+
+### 4.6 Release workflow
+
+1. Merge all changes to `main`; confirm tests pass
+2. `git tag v0.1.0 && git push --tags`
+3. GitHub Actions builds sdist + wheel, waits for manual approval in the `pypi`
+   environment, then publishes
+4. RTD picks up the tag and builds versioned docs (`v0.1.0` alongside `latest`)
+5. Create a GitHub Release from the tag with release notes
+
+---
+
+## Phase 5 — CI/CD Pipeline
+
+### 5.1 Current state
+
+The `.github/workflows/tests.yml` stub from Phase 1 covers the basics. The full
+pipeline below replaces and extends it.
+
+### 5.2 Recommended workflow files
+
+```
+.github/workflows/
+  tests.yml        # run test suite on every push and PR
+  lint.yml         # code quality checks on every push and PR
+  publish.yml      # build and publish to PyPI on version tag
+```
+
+### 5.3 `tests.yml` — test suite on push/PR
+
+```yaml
+name: Tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]   # test against multiple Python versions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/ -v --cov=foregrounds_diffusion --cov-report=xml
+      - uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+```
+
+### 5.4 `lint.yml` — code quality on push/PR
+
+```yaml
+name: Lint
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+      - run: pip install ruff mypy
+      - run: ruff check foregrounds_diffusion/       # fast linter (replaces flake8/isort)
+      - run: ruff format --check foregrounds_diffusion/
+      - run: mypy foregrounds_diffusion/ --ignore-missing-imports
+```
+
+### 5.5 Additional CI/CD improvements (suggested)
+
+The items below are ordered from most to least impactful for a research codebase.
+
+**a) Dependency review on PRs**
+```yaml
+# Flags PRs that add dependencies with known vulnerabilities
+- uses: actions/dependency-review-action@v4
+```
+Prevents accidentally pulling in a compromised transitive dependency.
+
+**b) Pin dependencies with `pip-compile`**
+```bash
+pip install pip-tools
+pip-compile pyproject.toml --output-file requirements.lock
+```
+Store `requirements.lock` in the repo. CI installs from the lock file, so the
+test environment is 100% reproducible. Add a weekly scheduled workflow to
+`pip-compile --upgrade` and open a PR with the diff.
+
+**c) Test result caching**
+```yaml
+- uses: actions/cache@v4
+  with:
+    path: ~/.cache/pip
+    key: ${{ runner.os }}-pip-${{ hashFiles('requirements.lock') }}
+```
+Cuts CI time by ~60% on cache hits.
+
+**d) Benchmark regression tracking**
+Add `pytest-benchmark` and a nightly workflow that runs the profiling harness
+from Phase 2.1 on a fixed synthetic dataset. Store results as a GitHub Actions
+artifact and fail the workflow if any benchmark regresses by more than 20%.
+Prevents optimisation work from being silently undone.
+
+**e) Notebook smoke tests**
+```yaml
+- run: jupyter nbconvert --to notebook --execute \
+         docs/tutorials/06_power_spectra.ipynb \
+         --ExecutePreprocessor.timeout=120
+```
+Run the key tutorial notebooks in CI (without FITS data — mock the data loading)
+to catch import errors and broken cells before they reach users on RTD.
+
+**f) Branch protection rules (GitHub settings, not a workflow)**
+- Require the `Tests` and `Lint` checks to pass before merging to `main`
+- Require at least 1 review for PRs
+- Prevent force-push to `main`
+
+**g) Changelog automation with `towncrier`**
+Each PR adds a small news fragment (`changes/123.bugfix.md`). On release,
+`towncrier build` assembles `CHANGELOG.md` automatically. Eliminates merge
+conflicts in a hand-maintained changelog.
+
+**h) Security scanning with `pip-audit`**
+```yaml
+- run: pip install pip-audit && pip-audit
+```
+Checks all installed packages against the OSV vulnerability database. Runs in
+under 10 seconds and catches issues like the `requests` CVEs.
+
+**i) `pre-commit` hooks (local, mirrors CI lint)**
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.0
+    hooks:
+      - id: ruff
+      - id: ruff-format
+```
+Catches lint errors locally before they reach CI, keeping the feedback loop tight.
+
+---
+
 ## Sequencing recommendation
 
-1. **Tests first** — write `conftest.py` and the unit tests for the three most-used
-   modules (`flatmaps`, `moments`, `morphology`). Wire up GitHub Actions.
-2. **Docstring audit** — fix missing/incomplete docstrings across all modules.
-   This is a prerequisite for useful auto-generated API docs.
-3. **Sphinx skeleton** — get a basic RTD build passing before adding content.
-4. **Optimisations** — profile a full sampling run, then JIT the top-3 hot spots.
-   Benchmark before and after with `timeit` to confirm gains.
-5. **Cython** — only if Numba JIT is insufficient for the Minkowski tensor loops.
+1. **CI foundation** — `tests.yml` + `lint.yml` + branch protection. Low effort, high value.
+2. **Tests** — write `conftest.py` and unit tests for `flatmaps`, `moments`, `morphology`.
+3. **Docstring audit** — prerequisite for useful API docs.
+4. **Sphinx + RTD skeleton** — get a basic build passing; RTD auto-updates on push from this point.
+5. **`pyproject.toml` audit + TestPyPI** — dry-run the publish workflow.
+6. **Optimisations** — profile first, then JIT; benchmark CI to guard regressions.
+7. **PyPI publish** — tag `v0.1.0`; set up Trusted Publisher; release.
+8. **Cython** — only if Numba JIT is insufficient.
+9. **Additional CI items** — add dependency pinning, notebook smoke tests, `towncrier`
+   incrementally as the project matures.

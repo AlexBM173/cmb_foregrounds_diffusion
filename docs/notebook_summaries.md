@@ -1,6 +1,6 @@
 # Notebook Summaries
 
-Descriptions of each notebook in the codebase, their relation to the paper ("Learning Correlated Astrophysical Foregrounds with Denoising Diffusion Probabilistic Models", Prabhu et al.), and their relation to the `foregrounds_diffusion/` module.
+Descriptions of each notebook in the codebase, their relation to the paper ("Learning Correlated Astrophysical Foregrounds with Denoising Diffusion Probabilistic Models", Prabhu et al.), and their relation to the `foregrounds_diffusion/` module. Also covers new extension modules added after the paper.
 
 ---
 
@@ -91,3 +91,71 @@ Implements the tSZ stacking analysis. Selects pixels exceeding SNR thresholds (5
 **Paper relation:** Directly implements §4.2 and produces Figure 3. The SNR bins, number of stacked clusters (263k/60k/3.9k for Agora), the 8% agreement finding, and the 2-halo term observation in the radial profiles all come from this notebook.
 
 **Module relation:** Uses `radial_profile` from `flatmaps.py` to convert the 2D stacked image into the 1D curves shown in Figure 3. The SNR selection logic is self-contained in the notebook.
+
+---
+
+## `docs/tutorials/10_peak_minima_counts.ipynb`
+
+Evaluates non-Gaussian structure in CIB and tSZ patches using peak and minima counts following Sabyr, Hill & Haiman (2024, arXiv:2410.21247). For each of three smoothing scales (θ_s = 1, 2.5, 5 arcmin FWHM), identifies local maxima and minima via `scipy`'s maximum/minimum filter, then bins counts as a function of amplitude threshold ν = T/σ (30 bins over ν ∈ [−1, 5] for peaks, ν ∈ [−5, 1] for minima). Plots mean ± std for Agora, DDPM, and Gaussian baseline, plus normalised residuals (Agora − DDPM)/σ_Agora. Uses 120 test maps per source. Outputs `plots/peak_minima_counts.pdf` and `plots/peak_minima_residuals.pdf`.
+
+**Paper relation:** No direct paper section — this is a proposed extension statistic. Peak counts are a well-established non-Gaussianity probe sensitive to cluster abundance at different signal levels, complementing the bandpass moment analysis in §4.6.
+
+**Module relation:** Uses `compute_peak_minima_counts` from `peak_counts.py`. Map loading and denormalisation follow the same pattern as the other evaluation notebooks: loads norm params from `norm_params_2mJy.npy`, applies the 80/20 train/test split with `seed=42`, and denormalises DDPM samples from the `new_samples_*.npy` file.
+
+---
+
+## `docs/tutorials/11_scattering_transforms.ipynb`
+
+Computes scattering transform coefficients for CIB and tSZ patches and compares Agora, DDPM, and Gaussian baseline distributions. Supports two backends: the Cheng et al. repo (recommended; must be cloned into the project root) or `kymatio` (pip-installable, slower, no C11). Uses J = 5 wavelet scales and L = 4 orientations. Computes:
+
+- **S1** (first-order): mean wavelet modulus at each scale j, averaged over orientations — plotted on a log scale, related to the power spectrum.
+- **S2** (second-order): cross-scale coupling matrix for pairs (j1, j2) with j2 > j1 — visualised as a DDPM/Agora ratio heatmap per channel.
+- **Flattened residuals**: full scattering feature vector (S1 + S2 concatenated via `scattering_summary`) normalised by Agora σ, shown as a bar chart.
+- **C11** (optional, Cheng et al. only): scattering covariance matrix, mean |C11_iso| visualised as a j2-j3 heatmap.
+
+Outputs `plots/scattering_S1.pdf`, `plots/scattering_S2_ratio.pdf`, `plots/scattering_residuals.pdf`, and optionally `plots/scattering_C11.pdf`.
+
+**Paper relation:** No direct paper section — scattering transforms are a proposed extension statistic. They capture non-Gaussian multi-scale correlations complementary to the bandpass moments in §4.6 and Appendix C, and have been used in CMB/LSS analysis (e.g. Mallat 2012, Cheng et al. 2020).
+
+**Module relation:** Uses `compute_scattering_coefficients`, `compute_scattering_covariance`, and `scattering_summary` from `scattering_stats.py`. Map loading and denormalisation are identical in structure to notebook 10.
+
+---
+
+## Package Modules (post-paper extensions)
+
+### `foregrounds_diffusion/peak_counts.py`
+
+Implements peak and minima counting statistics for flat-sky patches, following Sabyr, Hill & Haiman (2024, arXiv:2410.21247). Requires only numpy and scipy — no LensTools dependency needed for flat-sky data.
+
+**Public API:**
+
+| Function | Description |
+|---|---|
+| `smooth_map(patch, fwhm_arcmin, pixel_res_arcmin)` | Applies a Gaussian kernel (FWHM in arcmin) to a single 2D patch using `scipy.ndimage.gaussian_filter`. Converts FWHM to σ in pixels using the 6°/256px resolution. |
+| `find_peaks(patch, filter_size=3)` | Returns pixel values at local maxima via `maximum_filter`. Boundary pixels (within `filter_size//2` of the edge) are excluded to avoid edge artefacts. |
+| `find_minima(patch, filter_size=3)` | Returns pixel values at local minima via `minimum_filter`, with the same boundary exclusion. |
+| `count_peaks_binned(patches_nhw, thresholds, fwhm_arcmin, ...)` | Smooths each patch, normalises by per-map σ to get ν = T/σ, then counts peaks above each threshold. Returns shape `(N, len(thresholds))`. |
+| `count_minima_binned(patches_nhw, thresholds, fwhm_arcmin, ...)` | Same as above for minima below each threshold. |
+| `compute_peak_minima_counts(patches_nhw, thresholds_peaks, thresholds_minima, smoothing_scales_arcmin, ...)` | Top-level convenience wrapper. Loops over smoothing scales and returns a nested dict keyed by FWHM, then `'peaks'`/`'minima'`, each an `(N, len(thresholds))` array. |
+
+**Used by:** `docs/tutorials/10_peak_minima_counts.ipynb`
+
+---
+
+### `foregrounds_diffusion/scattering_stats.py`
+
+Wraps scattering transform backends to compute S1/S2 scattering coefficients and the scattering covariance C11 for ensembles of flat-sky patches. Tries to import the Cheng et al. `scattering` package first (faster, exposes C11); falls back to `kymatio` with a warning. Both require PyTorch.
+
+**Backend setup:**
+- Cheng et al. (preferred): `git clone https://github.com/SihaoCheng/scattering_transform.git` into the project root, then add to `sys.path`.
+- kymatio (fallback): `pip install kymatio`. C11 is unavailable; S2 is reconstructed from the flattened kymatio output by iterating over j2 > j1 pairs.
+
+**Public API:**
+
+| Function | Description |
+|---|---|
+| `compute_scattering_coefficients(patches_nhw, J=5, L=4, device=None)` | Computes S0 (mean), S1 `(N, J, L)`, and S2 `(N, J, L, J, L)` for a patch stack. Auto-detects GPU. Returns a dict also containing `S1_mean`, `S2_mean`, `J`, `L`. |
+| `compute_scattering_covariance(patches_nhw, J=5, L=4, device=None)` | Computes the full scattering covariance (C11_iso, C01_iso, etc.) via the Cheng et al. backend. Returns `None` with a warning if only kymatio is available. |
+| `scattering_summary(coeffs, scale_idx=None)` | Flattens S1 and the upper-triangle S2 entries (j2 > j1) into a single feature vector of shape `(N, n_features)`, suitable for computing per-feature residuals between ensembles. |
+
+**Used by:** `docs/tutorials/11_scattering_transforms.ipynb`

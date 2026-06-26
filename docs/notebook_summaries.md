@@ -147,14 +147,14 @@ Implements peak and minima counting statistics for flat-sky patches, following S
 Wraps scattering transform backends to compute S1/S2 scattering coefficients and the scattering covariance C11 for ensembles of flat-sky patches. Tries to import the Cheng et al. `scattering` package first (faster, exposes C11); falls back to `kymatio` with a warning. Both require PyTorch.
 
 **Backend setup:**
-- Cheng et al. (preferred): `git clone https://github.com/SihaoCheng/scattering_transform.git` into the project root, then add to `sys.path`.
-- kymatio (fallback): `pip install kymatio`. C11 is unavailable; S2 is reconstructed from the flattened kymatio output by iterating over j2 > j1 pairs.
+- Cheng et al. (preferred): `git clone https://github.com/SihaoCheng/scattering_transform.git` into the project root, then add to `sys.path`. Also requires `pip install appdirs` (missing from the repo's declared dependencies). The module translates `device='cuda'` → `'gpu'` internally since Cheng et al. uses `'gpu'`/`'cpu'` strings, not `'cuda'`.
+- kymatio (fallback): `pip install kymatio`. C11 is unavailable; S2 is reconstructed from the flattened kymatio output by iterating over j2 > j1 pairs; S1 is averaged over orientations to match the `S1_iso` convention.
 
 **Public API:**
 
 | Function | Description |
 |---|---|
-| `compute_scattering_coefficients(patches_nhw, J=5, L=4, device=None)` | Computes S0 (mean), S1 `(N, J, L)`, and S2 `(N, J, L, J, L)` for a patch stack. Auto-detects GPU. Returns a dict also containing `S1_mean`, `S2_mean`, `J`, `L`. |
+| `compute_scattering_coefficients(patches_nhw, J=5, L=4, device=None)` | Computes S0 `(N, 1)`, S1 `(N, J)` (orientation-averaged, `S1_iso` in Cheng et al. notation), and S2 `(N, J, J, L)` (cross-scale coupling as a function of orientation difference, `S2_iso`). Auto-detects GPU. Returns a dict also containing `S1_mean`, `S2_mean`, `J`, `L`. |
 | `compute_scattering_covariance(patches_nhw, J=5, L=4, device=None)` | Computes the full scattering covariance (C11_iso, C01_iso, etc.) via the Cheng et al. backend. Returns `None` with a warning if only kymatio is available. |
 | `scattering_summary(coeffs, scale_idx=None)` | Flattens S1 and the upper-triangle S2 entries (j2 > j1) into a single feature vector of shape `(N, n_features)`, suitable for computing per-feature residuals between ensembles. |
 

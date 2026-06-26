@@ -10,7 +10,7 @@ The entry-point for all data preparation. Builds the halo catalogue from 197 lig
 
 **Paper relation:** Implements the pipeline described in §2 and Figure 1 (the four-step flowchart). It is where the discrepancies noted in `paper_code_inconsistencies.md` live: point sources are masked by sigma-clipping in K_CMB rather than via a calibrated mJy threshold, and masked pixels are zeroed rather than Gaussian-inpainted.
 
-**Module relation:** Calls `get_patch_centers` and `FlatCutter.rotate_to_pole_and_interpolate` from `preprocessing.py`, and `apply_maxmin_normalization` (defined inline here, later extracted into `preprocessing.py`). The cluster masking uses `get_apodised_mdpl2_cluster_mask` from `get_cluster_source_mask_for_agora.py`.
+**Module relation:** Calls `get_patch_centers` and `FlatCutter.rotate_to_pole_and_interpolate` from `preprocessing.py`, and `apply_maxmin_normalization` (defined inline here, later extracted into `preprocessing.py`). The cluster masking uses `get_apodised_mdpl2_cluster_mask` from `masking.py`.
 
 ---
 
@@ -91,6 +91,56 @@ Implements the tSZ stacking analysis. Selects pixels exceeding SNR thresholds (5
 **Paper relation:** Directly implements §4.2 and produces Figure 3. The SNR bins, number of stacked clusters (263k/60k/3.9k for Agora), the 8% agreement finding, and the 2-halo term observation in the radial profiles all come from this notebook.
 
 **Module relation:** Uses `radial_profile` from `flatmaps.py` to convert the 2D stacked image into the 1D curves shown in Figure 3. The SNR selection logic is self-contained in the notebook.
+
+---
+
+## `docs/tutorials/02_masking.ipynb`
+
+Implements the two-step HEALPix masking pipeline from §2 of the paper, superseding the masking cells in `preprocessing.ipynb`. Loads full-sky CIB (Jy/sr, NSIDE=8192) and tSZ (Compton-y) FITS files, applies a 2 mJy point-source mask at full resolution via flux thresholding, inpaints masked pixels with Gaussian noise, degrades to NSIDE=2048, then builds and applies an apodised cluster mask for all halos with M500c ≥ 3×10¹⁴ M☉. Final maps are converted to physical units (μK) and saved.
+
+**Paper relation:** §2 (point-source and cluster masking descriptions). Implements the calibrated mJy threshold approach described in the paper (rather than the sigma-clipping shortcut used in the original `preprocessing.ipynb`).
+
+**Module relation:** Uses `get_point_source_mask_in_healpix`, `get_apodised_mdpl2_cluster_mask`, and `inpaint_masked_regions` from `masking.py`. (Before the package refactor, these lived in `get_cluster_source_mask_for_agora.py` and `preprocessing.py` respectively.)
+
+---
+
+## `docs/tutorials/06_power_spectra.ipynb`
+
+Computes and plots the angular auto- and cross-power spectra of CIB and tSZ channels for Agora test maps, DDPM-generated samples, and Gaussian realisations. Covers auto-spectra Cℓ^{CIB} and Cℓ^{tSZ}, the cross-spectrum Cℓ^{CIB×tSZ}, fractional residuals (Agora − DDPM)/σ_Agora, and multi-frequency CIB correlation coefficients across 95, 150, and 857 GHz. Binned over 300 < ℓ < 4000 in bins of Δℓ = 60.
+
+**Paper relation:** §4.3 (Figure 4 — power spectra comparison), Appendix B (Figure 9 — multi-frequency correlations).
+
+**Module relation:** Uses `mean_cls` and `mean_cross_cls` from `moments.py` and `map2cl` from `flatmaps.py`. (Before the refactor, the moment functions were in `statistics.py`.)
+
+---
+
+## `docs/tutorials/07_higher_order_stats.ipynb`
+
+Computes collapsed equilateral bispectrum (S3) and trispectrum (S4) statistics for Agora, DDPM, and Gaussian samples by bandpass-filtering into 8 ℓ-bands (Δℓ = 720, centred ℓ ≈ 300–5700) and computing variance/skewness/kurtosis of the filtered maps. Covers both the single summed-channel analysis (primary paper result) and all 12 CIB×tSZ cross-moment combinations (Appendix C). Adds three ILC noise tiers (SPT-3G, S4-Wide, S4-Ultra Deep). Moment computation is slow (~hours for full datasets); results are saved to `data/moments_*.npy` and reloaded for plotting.
+
+**Paper relation:** §3.2 (statistics definitions), §4.6 (Figure 7 — collapsed bispectrum/trispectrum of summed channel), Appendix C (Figures 10–11 — full cross-moment breakdown).
+
+**Module relation:** Uses `compute_summed_moments` and `compute_cross_moments` from `moments.py`, and `get_lpf_hpf` and `bandpass_filter` from `flatmaps.py`. (Before the refactor, the moment functions were in `statistics.py`.)
+
+---
+
+## `docs/tutorials/08_morphology_and_histograms.ipynb`
+
+Evaluates one-point statistics and morphological properties of DDPM samples. Plots normalised pixel-intensity histograms (1000 bins, Gaussian-smoothed) for CIB and tSZ maps from all three sources, then computes Minkowski functionals M0 (area fraction), M1 (total boundary length), and M2 (Euler characteristic) of excursion sets across 50 thresholds ν ∈ [0, 1] via the `quantimpy` (Boelens & Tchelepi) package.
+
+**Paper relation:** §4.4 (Figure 5 — pixel histograms), §4.5 (Figure 6 — Minkowski functionals).
+
+**Module relation:** Uses `compute_mfs` from `morphology.py` and `apply_maxmin_normalization` / `apply_stdnorm` from `preprocessing.py`. (Before the refactor, `compute_mfs` was in `statistics.py`.) Requires `quantimpy` to be installed from source with numpy 1.26.4.
+
+---
+
+## `docs/tutorials/09_tsz_stacking.ipynb`
+
+Implements the tSZ stacking analysis from §4.2 as a self-contained tutorial, replacing the inline SNR logic in the older `docs/stack_tsz_based_on_snr.ipynb`. Selects pixels above SNR thresholds in three bins (5–10σ, 10–20σ, ≥20σ) from Agora tSZ maps, extracts 22-pixel (≈31') cutouts centred on those pixels from both Agora and DDPM maps, stacks them, and plots stacked images, radial profiles (1' bins out to 10'), and Agora/DDPM ratios.
+
+**Paper relation:** §4.2 (Figure 3 — stacked tSZ profiles in three SNR bins).
+
+**Module relation:** Uses `select_snr_pixels` and `extract_cutouts` from `stacking.py`, and `radial_profile` from `flatmaps.py`. (Before the refactor, the stacking functions were in `statistics.py`.)
 
 ---
 

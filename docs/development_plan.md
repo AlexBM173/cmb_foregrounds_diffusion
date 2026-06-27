@@ -9,6 +9,56 @@ with the following ordering constraints:
 
 ---
 
+## Deadline and scope triage
+
+**Thesis deadline: 2026-07-01 (4 days from current date; no slack beyond the MVT subset).**
+The thesis is the primary deliverable. Phases 1–3 provide methodological rigour
+and are partially completable in the remaining time. Phases 4–6 are engineering
+polish that must be deferred beyond submission.
+
+### Effort estimates (4-day window)
+
+| Phase / section | Estimated effort | Priority |
+|---|---|---|
+| §1.1–1.3 Infrastructure + unit tests (flatmaps, moments, morphology) | 1.5 days | Must-do |
+| §2.1–2.3 Profiling baseline sweeps | 0.5 day | Must-do |
+| §2.4 Benchmark notebook skeleton | 0.5 day | Should-do |
+| §2.6b–c NumPy vectorisation + ℓ-bin precompute | 0.5 day | Should-do (no external deps) |
+| §3.2 `n_jobs` on two bottleneck functions | 0.5 day | Should-do |
+| §2.6a Numba JIT (pending profiling result) | 0.5 day | Optional |
+| §3.3 GPU port `map2cl_torch` | 0.5 day | Optional |
+| All remaining sections | — | Deferred — see below |
+
+### Minimum-viable-thesis subset
+
+The following is sufficient to support all evaluation claims in the thesis:
+
+1. Phase 1 tests for `flatmaps`, `moments`, and `morphology` (the three modules
+   invoked in every evaluation notebook). Tests for `stacking`, `peak_counts`, and
+   `scattering_stats` can be deferred if time runs out.
+2. §2.1–2.3 profiling baseline for `compute_minkowski_tensors` and
+   `compute_cross_moments` — the two dominant bottlenecks in the evaluation pipeline.
+3. §2.6b–c NumPy threshold vectorisation and ℓ-bin pre-computation (both are
+   dependency-free and low-risk).
+4. §3.2 `n_jobs` parameter on `compute_minkowski_tensors` and
+   `compute_cross_moments` only.
+
+### Explicit cut / defer list
+
+The following are explicitly **deferred past the thesis deadline**:
+
+| Item | Section | Reason |
+|---|---|---|
+| MPI multi-node evaluation | §3.5 | Requires cluster allocation; deadlock risk if rushed |
+| DeepSpeed / multi-node training | §3.6 | Not needed at dim=64; see §3.6 for DDP alternative |
+| Cython extensions | §2.6g | Only needed if Numba JIT proves insufficient |
+| PyPI distribution | §5 | Post-submission packaging; no thesis value |
+| ReadTheDocs full setup | §4.3–4.5 | §4.1 docstring audit is sufficient for thesis appendix |
+| `towncrier` changelog | §6.5g | No changelog required pre-v1.0 |
+| Trusted Publisher + PyPI release | §5.5–5.6 | Post-submission |
+
+---
+
 ## Phase 1 — Testing Suite
 
 ### 1.1 Infrastructure
@@ -34,9 +84,19 @@ with the following ordering constraints:
 - **Fixtures (`conftest.py`):**
   - `rng` — seeded `np.random.default_rng(42)`
   - `flatskymapparams` — `[64, 64, 1.41, 1.41]` (small maps for speed)
+  - `flatskymapparams_256` — `[256, 256, 1.41, 1.41]` (production size, used by benchmark tests)
   - `gaussian_patch` — single 64×64 Gaussian realisation
   - `patch_stack` — `(16, 64, 64)` stack of Gaussian patches
+  - `patch_stack_256` — `(16, 256, 256)` stack of Gaussian patches at production resolution (required by §2.7 benchmark tests)
   - `binary_map` — 64×64 binary excursion set at a fixed threshold
+
+**Pixel-scale convention note:** the canonical pixel scale throughout this project
+is **1.41 arcmin/pixel**, matching the `flatskymapparams` fixture above and the
+hard-coded `dx_arcmin=1.41` in `map2cl_torch` (§3.3). `peak_counts.smooth_map`
+defaults to `pixel_res_arcmin=1.40625` (exact 6°/256 px = 1.40625 arcmin); the
+~0.3% difference is not physically significant but breaks module consistency.
+All test and benchmark calls to `smooth_map` must pass `pixel_res_arcmin=1.41`
+explicitly so every module operates on the same pixel scale.
 
 ### 1.2 Unit tests per module
 
@@ -44,13 +104,17 @@ with the following ordering constraints:
 - `get_lxly`: shape, dtype, zero at DC
 - `map2cl`: output shape, positivity, symmetry under map flip
 - `cl2map`: round-trip `cl2map → map2cl` recovers input spectrum within sample variance
-- `make_gaussian_realisation`: pixel variance matches input `Cl` amplitude
+- `make_gaussian_realisation` (single-field): pixel variance matches input `Cl` amplitude
+- `make_gaussian_realisation` (correlated two-field path): generate a correlated pair by passing `cl2=` and `cl12=` kwargs; measure auto-spectra of each field and the cross-spectrum with `map2cl`; assert recovered auto-spectra match the input `Cl` arrays within sample variance and that the sign of the cross-spectrum matches `cl12`. This is the actual scientific control used in the thesis comparison — the correlated path exercises the code branch that matters for CIB×tSZ validation.
 - `radial_profile`: monotonically spaced bins, correct output shape
 - `bandpass_filter`: energy outside band is suppressed
 
 **`test_preprocessing.py`**
 - `apply_maxmin_normalization`: output in `[0, 1]`, min=0, max=1
-- `apply_stdnorm`: output mean≈0, std≈1
+- `apply_maxmin_normalization` round-trip: normalise then invert (scale by `(max - min)` and shift by `min`) recovers the original array within `atol=1e-6`; this tests that `renormalize_dm_maps` (which applies the inverse) preserves physical amplitudes — a known post-sampling inconsistency flagged in `docs/paper_code_inconsistencies.md`. The round-trip test passes only when `train_maps` (the reference used for inversion) is the same realisation that was originally min-max normalised. Shape contract: `dm_maps` must be channels-first `(N, C, H, W)` and `train_maps` channels-last `(N, H, W, C)` — `renormalize_dm_maps` transposes internally
+- `apply_stdnorm`: output mean≈0, std≈1 per channel; input must be channels-last `(..., C)` — the on-disk convention (do not transpose before calling)
+- `apply_stdnorm` round-trip: normalise then invert (multiply by stored std, add stored mean) recovers original within `atol=1e-6`
+- Power-spectrum amplitude preservation: min-max normalise a Gaussian realisation, invert with `renormalize_dm_maps`, measure power spectrum with `map2cl`; assert ratio to original power spectrum is within 1% at each ℓ-bin
 - `get_lpf_hpf`: low-pass kills high-ℓ; high-pass kills low-ℓ
 - `augment_images_unique`: output has 8× the input count; no duplicate tensors
 - `load_all_moments`: returns correct shape given mock `.npy` files (monkeypatch)
@@ -62,17 +126,17 @@ with the following ordering constraints:
 - `stats`: correct min/max/mean/std on known array
 
 **`test_moments.py`**
-- `mean_cls`: output shape `(n_bins,)`, values positive
+- `mean_cls`: returns tuple `(el, mean_cl, std_cl)` each shape `(n_bins,)`; `mean_cl` values positive for auto-spectra
 - `mean_cross_cls`: cross-spectrum of independent maps is near zero (within noise)
 - `compute_summed_moments`: shape `(N, n_bands, 3)`; Gaussian input gives S3≈0, S4≈0
-- `compute_cross_moments`: shape `(N, n_bands, 12)`; labels returned correctly
+- `compute_cross_moments`: returns tuple `(moments_out, labels)` where `moments_out` shape is `(N, n_bands, 12)` and `labels` is a list of 12 strings; assert `labels == ['S2aa','S2bb','S2ab','S3aaa','S3bbb','S3aab','S3abb','S4aaaa','S4bbbb','S4aaab','S4aabb','S4abbb']` (exact order, confirmed from `moments.py`) and `moments_out.shape == (N, n_bands, 12)`
 
 **`test_morphology.py`**
 - `_eigendecompose_2x2`: identity matrix gives β=1, θ=0; known anisotropic tensor gives correct β
 - `_tensor_W012`: all-ones binary map gives isotropic tensor (β≈1)
 - `_tensor_W200`: circular excursion set gives β≈1
 - `compute_minkowski_tensors`: shape `{'W012': {'beta': (N,T), 'theta': (N,T)}}`; β ∈ [0,1]
-- `compute_mfs` (requires `quantimpy`): marked `pytest.mark.optional`; M0 decreasing with threshold
+- `compute_mfs` (requires `quantimpy`): marked `pytest.mark.optional`; returns tuple `(M0, M1, M2)` each shape `(N, T)` (M0 ≡ V0 area fraction, M1 ≡ V1 perimeter, M2 ≡ V2 Euler characteristic — same quantities, different naming convention); assert M0 decreasing with threshold
 
 **`test_stacking.py`**
 - `select_snr_pixels`: returns list of tuples; all coordinates within map bounds; min_separation enforced
@@ -92,7 +156,7 @@ with the following ordering constraints:
 
 **`test_scattering_stats.py`**
 - Import handled gracefully when neither backend is available (mock both)
-- `scattering_summary`: output shape `(N, n_features)` where `n_features = J + J*(J-1)/2`
+- `scattering_summary`: `scattering_summary` consumes a `coeffs` dict returned by `compute_scattering_coefficients` (keys `'J'`, `'S1'`, `'S2'`), not raw patches directly. Test sequence: call `compute_scattering_coefficients(patches)` to obtain `coeffs`, then call `scattering_summary(coeffs, scale_idx=None)`; assert output shape `(N, n_features)`. Do not hard-code the feature count formula `J + L*J*(J-1)/2` because it depends on the backend and J/L parameters; instead compute the reference feature count from a single-map batch (`N=1`) and assert the multi-map output's feature dimension matches that reference.
 
 ### 1.3 Integration tests
 
@@ -102,8 +166,9 @@ with the following ordering constraints:
 - Assert recovered spectrum within 20% of input at each ℓ-bin (loose tolerance for small maps)
 
 **`test_preprocessing_pipeline.py`**
-- Synthetic `(8, 64, 64, 2)` array through normalisation → augmentation → DataLoader
-- Assert augmented count = 64, dtype float32, values in expected range
+- Synthetic `(8, 64, 64, 2)` array (channels-last, as on disk) through normalisation → `split_data_to_tensors` → `augment_images_unique` → DataLoader
+- Pass explicit `train_size=0.8, val_size=0.1, test_size=0.1` to match project usage (the function default is 70/15/15, not 80/10/10)
+- Assert augmented training count = 64 (8 patches × 8× augmentation), dtype float32, channels-first shape `(64, 2, 64, 64)`, values in expected range
 
 ---
 
@@ -168,11 +233,11 @@ def profile_fn(fn, *args, n_repeat=5, **kwargs):
 Priority is proportional to call frequency in the evaluation pipeline.
 
 **`flatmaps.py`**
-- `map2cl(maps_nhw, mapparams, lmin, lmax, binsize)` — called N times per evaluation; FFT-based
-- `cl2map(mapparams, cl, el)` — used in Gaussian baseline generation
-- `make_gaussian_realisation(mapparams, cl, el)` — called ~1000× to build baseline
-- `bandpass_filter(mapparams, lminmax)` — called once per ℓ-band per evaluation run
-- `radial_profile(stack, xy, bin_size, ...)` — called per SNR bin in stacking
+- `map2cl(flatskymapparams, flatskymap1, flatskymap2=None, binsize=None, minbin=100, maxbin=10000)` — called N times per evaluation; FFT-based; note `minbin`/`maxbin` not `lmin`/`lmax`
+- `cl2map(mapparams, cl, el=None)` — used in Gaussian baseline generation; `el` is optional (defaults to the map's own ℓ grid when `None`)
+- `make_gaussian_realisation(mapparams, el, cl)` — called ~1000× to build baseline
+- `bandpass_filter(fmap, bp)` — applies a pre-computed 2D filter (`bp` from `get_lpf_hpf`); called once per ℓ-band per map per evaluation run
+- `radial_profile(z, xy, bin_size, ...)` — called per SNR bin in stacking
 
 **`moments.py`**
 - `mean_cls(maps_nhw, mapparams, lmin, lmax, binsize)` — wraps `map2cl`; scales with N
@@ -193,7 +258,7 @@ Priority is proportional to call frequency in the evaluation pipeline.
 - `compute_peak_minima_counts(patches_nhw, ...)` — full pipeline; expected ~linear in N
 
 **`stacking.py`**
-- `select_snr_pixels(tsz_maps_nhw, snr_min, snr_max, min_separation)` — separation check loop; scales poorly with N
+- `select_snr_pixels(tsz_maps_nhw, snr_min, snr_max, min_separation)` — applies `scipy.ndimage.maximum_filter` per map for vectorised local-maximum detection; scales as O(N·HW)
 - `extract_cutouts(maps_nhw, coords, cutout_size)` — numpy slicing; likely fast
 
 **`scattering_stats.py`**
@@ -223,10 +288,10 @@ time and peak memory. Use log-spaced values to reveal power-law scaling.
 |---|---|---|
 | `map2cl` | O(N · HW log HW) | O(HW) |
 | `compute_summed_moments` | O(N · B · HW log HW) | O(B · HW) |
-| `compute_cross_moments` | O(12 · N · B · HW log HW) | O(B · HW) |
+| `compute_cross_moments` | O(N · B · HW log HW) | O(B · HW) |
 | `compute_minkowski_tensors` | O(N · T · HW) | O(N · T · HW) if vectorised |
 | `_tensor_W012` | O(HW) | O(HW) |
-| `select_snr_pixels` | O(N · K²) where K = n_peaks | O(K) |
+| `select_snr_pixels` | O(N · HW) | O(HW) |
 | `smooth_map` | O(N · HW) | O(HW) |
 
 Fit the empirical slope in log-log space:
@@ -277,6 +342,14 @@ See §2.5 below.
 | `select_snr_pixels` | | | | | |
 | ... | | | | | |
 
+**Section 8 — Parallel scaling** (populated in §3.9)
+- 8a. Strong scaling (Figure 11)
+- 8b. Weak scaling (Figure 12)
+- 8c. MPI communication overhead (Figure 13)
+- 8d. GPU vs CPU throughput (Figure 14)
+- 8e. Multi-GPU throughput (Figure 15)
+- 8f. Parallel scaling summary table
+
 ---
 
 ### 2.5 Figures
@@ -316,7 +389,7 @@ annotation: highlight the 256² production size
 **Figure 5 — Before/after speedup bar chart (N=100, H=W=256)**
 ```
 x-axis: function name
-y-axis: speedup factor (post_time / pre_time, log scale)
+y-axis: speedup factor (pre_time / post_time, log scale)  # >1 means faster
 colour: green if ≥2×, yellow if 1.2–2×, red if <1.2×
 ```
 
@@ -369,19 +442,45 @@ colourmap: green (linear or better) → red (superlinear)
 Applied after baseline measurements are recorded. Each optimisation is benchmarked
 immediately after implementation, before moving to the next.
 
-**a) Numba JIT — highest priority**
+**Correctness gate (mandatory before any benchmark):**
+Every optimised implementation must pass an equivalence test against the reference
+before its benchmark numbers are recorded. Run this check in CI:
+```python
+import numpy as np
+ref = original_fn(test_input, **kwargs)
+opt = optimised_fn(test_input, **kwargs)
+# For ndarray outputs:
+assert np.allclose(ref, opt, rtol=1e-5, atol=1e-8), "optimised output diverges from reference"
+# For tuple outputs (e.g. compute_mfs, compute_cross_moments):
+for r, o in zip(ref, opt):
+    assert np.allclose(r, o, rtol=1e-5, atol=1e-8)
+# For torch tensors (§3.3):
+assert torch.allclose(ref_tensor, opt_tensor, rtol=1e-5, atol=1e-8)
+```
+Add these as `tests/benchmarks/test_equivalence.py` so CI catches regressions
+at every commit, not just during initial optimisation.
 
-Target: `_tensor_W012`, `_tensor_W200`, `_tensor_W201` pixel-level loops and
-the outer `(map, threshold)` loop in `compute_minkowski_tensors`.
+**a) Numba JIT — candidate pending profiling**
+
+**Important constraint:** the true bottleneck in `_tensor_W012` and `_tensor_W201`
+is `scipy.ndimage.binary_erosion` and `scipy.ndimage.sobel` — both are pre-compiled
+C/Fortran and cannot run inside a Numba `nopython=True` kernel. Only the
+normal-vector accumulation loop (after the scipy calls return) is JIT-eligible.
+Profile first (§2.4 Section 2c) to confirm the accumulation is a material fraction
+of total time before investing in Numba.
+
+If profiling shows the accumulation loop is ≥ 30% of `compute_minkowski_tensors`
+time, apply JIT to that loop only:
 
 ```python
 import numba
 
 @numba.jit(nopython=True, cache=True)
-def _accumulate_normals(rows, cols, gx, gy):
+def _accumulate_normals(bx, by):
+    """Accumulate W012 tensor from boundary normal components."""
     W = np.zeros((2, 2))
-    for i in range(len(rows)):
-        nx, ny = gx[rows[i], cols[i]], gy[rows[i], cols[i]]
+    for i in range(len(bx)):
+        nx, ny = bx[i], by[i]
         norm = np.sqrt(nx*nx + ny*ny)
         if norm > 0:
             nx /= norm; ny /= norm
@@ -392,6 +491,8 @@ def _accumulate_normals(rows, cols, gx, gy):
 
 Use `cache=True` so compilation is skipped on subsequent calls (important in CI).
 Warm up the JIT cache with a small dummy call before the benchmark.
+If the accumulation fraction is < 30%, skip Numba and rely on NumPy vectorisation
+(§2.6b) and GPU binarisation (§3.3) instead.
 
 **b) NumPy threshold vectorisation**
 
@@ -403,6 +504,11 @@ binary_stack = maps_nhw[:, None, :, :] > thresholds[None, :, None, None]  # (N, 
 Then process each `(n, t)` slice with the JIT kernel. Removes the Python threshold
 loop and enables better cache locality.
 
+**Memory warning:** at production scale (N=100, T=100, H=W=256) the `(N, T, H, W)` bool
+array occupies ~655 MB. If this exceeds available RAM, chunk over N rather than materialising
+the full array: process `binary_stack = chunk[:, None] > thresholds[None, :, None, None]`
+inside the existing N loop and keep T vectorised.
+
 **c) `mean_cls` / `mean_cross_cls` — pre-compute ℓ-bin mask**
 
 Currently recomputes the ℓ-bin assignment array inside each `map2cl` call.
@@ -412,21 +518,45 @@ lbin_idx = np.digitize(ell_2d.ravel(), bins)   # computed once
 # then reuse across all N maps
 ```
 
-**d) `select_snr_pixels` — `cKDTree` separation check**
+**d) `select_snr_pixels` — batch `maximum_filter` across N maps**
 
-The current separation check is O(K²) in the number of candidate pixels.
-Replace with `scipy.spatial.cKDTree` for O(K log K):
-```python
-from scipy.spatial import cKDTree
-tree = cKDTree(candidate_coords)
-pairs = tree.query_pairs(r=min_separation)
-# remove one member of each conflicting pair
-```
+`select_snr_pixels` calls `scipy.ndimage.maximum_filter` once per map in a Python
+loop over N. The filter itself is O(HW) and dominates; the Python loop adds overhead.
+Two vectorisation strategies (choose after profiling §2.4 2e):
+
+1. **Restrict to the SNR-mask bounding box.** Compute the bounding box of pixels
+   in the SNR range before calling `maximum_filter` and pass only that sub-array.
+   For typical tSZ maps where clusters occupy a small sky fraction this reduces the
+   effective HW per call substantially.
+
+2. **Single batched `maximum_filter` call over the N-stack.** `scipy.ndimage.maximum_filter`
+   accepts N-dimensional arrays. Use `size=(1, min_separation, min_separation)` to filter
+   spatially but not across the N axis — this replicates `size=min_separation` per-map
+   semantics exactly, including scipy's even/odd origin handling:
+   ```python
+   from scipy.ndimage import maximum_filter
+
+   # snr_stack_nhw must already be per-map SNR-normalised (each map divided by its
+   # own std) before calling this, mirroring what select_snr_pixels does per map.
+   # size=(1, min_separation, min_separation) is the direct 3-D equivalent of the
+   # per-map size=min_separation call; do NOT substitute 2*min_separation+1 here.
+   local_max_stack = maximum_filter(snr_stack_nhw, size=(1, min_separation, min_separation))
+   ```
+   One C-level call replaces the Python loop and improves cache utilisation.
+   Correctness gate: output must match the per-map loop on the same input before
+   any benchmark is recorded.
 
 **e) Memory layout — C-contiguous enforcement**
 
-Add `maps = np.ascontiguousarray(maps)` at the entry point of `map2cl`,
-`get_lpf_hpf`, and `bandpass_filter`. Prevents silent internal copies in
+Add `maps = np.ascontiguousarray(maps)` at the entry point of `map2cl` and
+`fmap = np.ascontiguousarray(fmap)` inside `bandpass_filter`. `get_lpf_hpf` is
+defined in both `flatmaps.py` (line 51, canonical — this is the version called by
+`bandpass_filter` in the same module) and `preprocessing.py` (line 285, duplicate
+retained for historical compatibility). The canonical `flatmaps.get_lpf_hpf` has signature
+`get_lpf_hpf(flatskymapparams, lmin_lmax, filter_type=0)` where `lmin_lmax` is a
+scalar (for low- or high-pass) or a `(lmin, lmax)` pair (for band-pass,
+`filter_type=2`). It does not receive a map array, so contiguity enforcement
+does not apply to it. Prevents silent internal copies in
 numpy's FFT when arrays arrive in non-standard memory order.
 
 **f) `torch.compile` for sampling**
@@ -454,15 +584,34 @@ a C compiler.
 ### 2.7 pytest-benchmark integration
 
 Add `tests/benchmarks/` with one file per module, using `pytest-benchmark`
-for statistically robust, reproducible timings:
+for statistically robust, reproducible timings. **Each benchmark file must also
+contain the equivalence test from §2.6 so correctness and speed are validated
+in the same CI run.**
 
 ```python
 # tests/benchmarks/test_bench_morphology.py
+import numpy as np
+import pytest
+from foregrounds_diffusion.morphology import compute_minkowski_tensors
+
+thresholds = np.linspace(-3, 3, 25)
+
+def test_minkowski_tensors_equivalence(patch_stack_256):
+    """Optimised output must match reference before benchmarking."""
+    ref = compute_minkowski_tensors(patch_stack_256, lambda x: x, thresholds)
+    opt = compute_minkowski_tensors_v2(patch_stack_256, lambda x: x, thresholds)
+    # ref and opt are dicts of {tensor_key: {stat: (N,T) array}}
+    for key in ref:
+        for stat in ref[key]:
+            assert np.allclose(ref[key][stat], opt[key][stat], rtol=1e-5, atol=1e-8)
+
 def test_minkowski_tensors_baseline(benchmark, patch_stack_256):
-    benchmark(compute_minkowski_tensors, patch_stack_256, identity, thresholds)
+    # patch_stack_256 is the (16, 256, 256) fixture from conftest.py
+    benchmark(compute_minkowski_tensors, patch_stack_256, lambda x: x, thresholds)
 
 def test_minkowski_tensors_optimised(benchmark, patch_stack_256):
-    benchmark(compute_minkowski_tensors_v2, patch_stack_256, identity, thresholds)
+    # compute_minkowski_tensors_v2 is the Numba/vectorised version from §2.6a-b
+    benchmark(compute_minkowski_tensors_v2, patch_stack_256, lambda x: x, thresholds)
 ```
 
 Run and save a JSON baseline:
@@ -493,7 +642,7 @@ results from Phase 2.
 | Single node, multi-core (CPU) | `joblib.Parallel` | Any loop over N maps |
 | Single node, multi-GPU | `torch.multiprocessing` / `accelerate` | GPU statistics, sampling |
 | Multi-node, no shared memory | `mpi4py` | Large-scale evaluation across nodes |
-| Multi-node, deep learning | `accelerate` + DeepSpeed ZeRO | Multi-node training |
+| Multi-node, deep learning | `accelerate` + DDP (MULTI_GPU) | Multi-node training at current model size; ZeRO only if model > VRAM |
 | Coarse-grained cluster tasks | SLURM array jobs | Evaluation over many checkpoints/seeds |
 | Async I/O overlap | `DataLoader(num_workers=N)` | Training data pipeline |
 
@@ -505,21 +654,22 @@ The following functions are independent per map and have no inter-map communicat
 They can all be parallelised with the same pattern: chunk the N axis, process each
 chunk in a separate worker, concatenate results.
 
-| Function | Output shape | Merge strategy |
+| Function | Actual return type | Merge strategy |
 |---|---|---|
-| `compute_minkowski_tensors` | `(N, T)` per tensor type | `np.concatenate` along axis 0 |
-| `compute_mfs` | `(N, T, 3)` | `np.concatenate` along axis 0 |
-| `compute_cross_moments` | `(N, B, 12)` | `np.concatenate` along axis 0 |
-| `compute_summed_moments` | `(N, B, 3)` | `np.concatenate` along axis 0 |
-| `mean_cls` (per-map spectra) | `(N, n_bins)` | `np.concatenate`, then `np.mean` |
-| `compute_peak_minima_counts` | `(N, n_scales, n_thresholds)` | `np.concatenate` along axis 0 |
-| `smooth_map` | `(H, W)` | applied per map, no merge needed |
-| `extract_cutouts` | `(M, size, size)` | `np.concatenate` along axis 0 |
+| `compute_minkowski_tensors` | `dict` mapping each tensor key to `{'beta': (N,T), 'theta': (N,T)}` | merge each leaf array with `np.concatenate(..., axis=0)`; see `parallel_minkowski_tensors` below |
+| `compute_mfs` | tuple `(M0, M1, M2)` each `(N, T)` | `tuple(np.concatenate([r[i] for r in results], axis=0) for i in range(3))` |
+| `compute_cross_moments` | tuple `(moments_out, labels)` where `moments_out` is `(N, B, 12)` and `labels` is a fixed list of str | concatenate `moments_out` along axis 0; `labels` is identical for every chunk — take from `results[0][1]` |
+| `compute_summed_moments` | `ndarray (N, B, 3)` | `np.concatenate` along axis 0 |
+| `mean_cls` | tuple `(el, mean_cl, std_cl)` already averaged over N — no per-map array | not directly parallelisable via chunk-and-concat; parallelise the internal per-map loop with `joblib` instead (wrap the `for m in maps_nhw` loop) |
+| `compute_peak_minima_counts` | nested `dict` of arrays with N along axis 0 | recurse over leaves with `np.concatenate(..., axis=0)` |
+| `smooth_map` | `(H, W)` | applied per map inside the caller loop; no merge needed |
+| `extract_cutouts` | `(M, size, size)` | `np.concatenate` along axis 0 — **note:** if `extract_cutouts` accepts a `max_cutouts` cap (default 500), that cap applies *per chunk* in the parallel version, so the total number of returned cutouts can reach `n_jobs × 500`; this differs from the serial result where the cap is global. Either disable the cap or enforce a post-concatenation trim when results must match serial output exactly. |
 
 **Canonical joblib pattern:**
 
 ```python
 from joblib import Parallel, delayed
+from multiprocessing import cpu_count
 import numpy as np
 
 def _chunk(arr, n_jobs):
@@ -527,7 +677,8 @@ def _chunk(arr, n_jobs):
     return [arr[i*k + min(i,rem):(i+1)*k + min(i+1,rem)] for i in range(n_jobs)]
 
 def parallel_minkowski_tensors(maps_nhw, norm_fn, thresholds, n_jobs=-1):
-    chunks = _chunk(maps_nhw, n_jobs if n_jobs > 0 else cpu_count())
+    n = n_jobs if n_jobs > 0 else cpu_count()
+    chunks = _chunk(maps_nhw, n)
     results = Parallel(n_jobs=n_jobs)(
         delayed(compute_minkowski_tensors)(chunk, norm_fn, thresholds)
         for chunk in chunks
@@ -546,13 +697,36 @@ Set `n_jobs=-1` to use all physical cores. Use `backend="loky"` (default) for
 CPU-bound tasks; use `backend="threading"` only when the function releases the GIL
 (e.g. pure NumPy/SciPy code).
 
+**Dual-array functions (`compute_summed_moments`, `compute_cross_moments`):**
+
+Both functions accept two aligned arrays (`cib` and `tsz`) that must be chunked
+together — the single-array `_chunk` pattern above would misalign the inputs.
+Use `zip` to keep the two stacks in lockstep:
+
+```python
+def parallel_cross_moments(cib, tsz, bp_filters, n_jobs=-1):
+    n = n_jobs if n_jobs > 0 else cpu_count()
+    cib_chunks = _chunk(cib, n)
+    tsz_chunks  = _chunk(tsz, n)
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(compute_cross_moments)(c, t, bp_filters)
+        for c, t in zip(cib_chunks, tsz_chunks)
+    )
+    moments_out = np.concatenate([r[0] for r in results], axis=0)
+    labels = results[0][1]   # identical for every chunk — take from first result
+    return moments_out, labels
+```
+
+Apply the same `zip(cib_chunks, tsz_chunks)` pattern for
+`parallel_summed_moments` wrapping `compute_summed_moments(cib, tsz, bp_filters)`.
+
 **Add `n_jobs` parameter to each function** in the public API so users can opt in
 without importing `joblib` directly:
 
 ```python
 def compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, n_jobs=1):
     if n_jobs != 1:
-        return _parallel_minkowski_tensors(maps_nhw, norm_fn, thresholds, n_jobs)
+        return parallel_minkowski_tensors(maps_nhw, norm_fn, thresholds, n_jobs)
     # existing single-threaded implementation ...
 ```
 
@@ -570,20 +744,95 @@ amortised across the batch — worth it for N ≥ 50 on 256² maps.
 **`map2cl` → `torch.fft.rfft2`**
 
 ```python
-import torch
+import torch, math
 
-def map2cl_torch(maps_nhw: torch.Tensor, lbin_idx, n_bins):
-    # maps_nhw: (N, H, W) on GPU
-    fft = torch.fft.rfft2(maps_nhw)                  # (N, H, W//2+1) complex
-    power = (fft.real**2 + fft.imag**2)              # (N, H, W//2+1)
-    cl = torch.zeros(maps_nhw.shape[0], n_bins, device=maps_nhw.device)
-    cl.scatter_add_(1, lbin_idx.expand(maps_nhw.shape[0], -1),
-                    power.reshape(maps_nhw.shape[0], -1))
-    return cl / bin_counts                             # normalise by hits per bin
+def map2cl_torch(maps_nhw: torch.Tensor, lbin_idx_rfft, bin_counts, n_bins,
+                 dx_arcmin: float):
+    """
+    maps_nhw      : (N, H, W) float tensor on GPU
+    lbin_idx_rfft : (H*(W//2+1),) long tensor — ℓ-bin index for each rfft2 pixel,
+                    derived from get_lxly applied to the rfft2 frequency grid
+                    (NOT from ell_2d.ravel() which covers the full fft2 grid)
+    bin_counts    : (n_bins,) float tensor — number of rfft2 pixels per bin
+    dx_arcmin     : pixel size in arcminutes (same for x and y)
+    """
+    N, H, W = maps_nhw.shape
+    dx_rad = math.radians(dx_arcmin / 60.)
+    # Physical normalisation: matches CPU map2cl which computes
+    # |fft2(map) * dx_rad|^2 / (nx * ny)
+    norm = dx_rad ** 2 / (H * W)
+    fft   = torch.fft.rfft2(maps_nhw)              # (N, H, W//2+1) complex
+    power = (fft.real**2 + fft.imag**2) * norm     # (N, H, W//2+1)
+    flat  = power.reshape(N, -1)                   # (N, H*(W//2+1))
+    cl    = torch.zeros(N, n_bins, device=maps_nhw.device)
+    cl.scatter_add_(1, lbin_idx_rfft.expand(N, -1), flat)
+    return cl / bin_counts                          # normalise by hits per bin
 ```
 
-This computes all N power spectra in a single batched FFT call — O(N) GPU launches
-vs O(N) Python iterations in the CPU version.
+**Note on `lbin_idx_rfft`:** `torch.fft.rfft2` returns only the non-redundant half
+of the spectrum (`W//2+1` columns), so the ℓ-bin assignment must be built from the
+rfft2 frequency grid — not from `ell_2d.ravel()` which covers the full `(H, W)`
+fft2 grid. Pre-compute once before any batched call:
+
+```python
+from foregrounds_diffusion.flatmaps import get_lxly
+import numpy as np, torch
+
+def build_lbin_idx_rfft(mapparams, binsize=None, minbin=100, maxbin=10000):
+    """Build ℓ-bin index tensor for map2cl_torch, matching CPU map2cl bin edges.
+
+    get_lxly returns (lx, ly) on the full (H, W) fft2 grid.  rfft2 keeps
+    columns 0 … W//2 (inclusive), so slice the first W//2+1 columns only.
+    The binsize default mirrors the smallest lx spacing that map2cl uses.
+    """
+    nx, ny, dx, dy = mapparams
+    lx, ly = get_lxly(mapparams)                        # (H, W) each
+    ell_2d = np.sqrt(lx**2 + ly**2)
+    ell_rfft = ell_2d[:, :nx//2 + 1]                   # (H, W//2+1)
+    if binsize is None:
+        binsize = lx[0, 1] - lx[0, 0]                  # smallest ℓ step
+    bins = np.arange(minbin, maxbin, binsize)            # matches radial_profile bin edges
+    n_bins = len(bins)
+    lbin_idx = np.digitize(ell_rfft.ravel(), bins) - 1  # 0-indexed; range -1 … n_bins-1
+    valid = (lbin_idx >= 0) & (lbin_idx < n_bins)
+    lbin_idx[~valid] = n_bins                            # sentinel for out-of-range
+    bin_counts = np.bincount(lbin_idx[valid], minlength=n_bins).astype(np.float32)
+    # Note: radial_profile divides each bin sum by the count of NONZERO pixels
+    # ('hits'), not the total number of pixels in the bin.  For Gaussian PSDs
+    # every pixel is non-zero and the two counts agree; the rtol=1e-4 tolerance
+    # in the equivalence test below absorbs any residual float32/float64
+    # difference, so no correction is needed here.
+    return (torch.from_numpy(lbin_idx).long(),          # (H*(W//2+1),)
+            torch.from_numpy(bin_counts),               # (n_bins,)
+            n_bins)
+```
+
+Call `build_lbin_idx_rfft(mapparams)` once, move the tensors to GPU, and pass them
+to every `map2cl_torch` call.
+
+**Equivalence test (mandatory before benchmarking):**
+```python
+import torch, numpy as np
+from foregrounds_diffusion.flatmaps import map2cl
+
+rng = np.random.default_rng(42)
+maps_np = rng.standard_normal((8, 256, 256)).astype(np.float32)
+mapparams = [256, 256, 1.41, 1.41]
+
+# CPU reference (per-map, then stack)
+el_ref, cl_ref = zip(*[map2cl(mapparams, m) for m in maps_np])
+cl_ref = np.stack(cl_ref)   # (8, n_bins)
+
+# GPU port
+maps_t = torch.from_numpy(maps_np).cuda()
+cl_gpu = map2cl_torch(maps_t, lbin_idx_rfft, bin_counts, n_bins, dx_arcmin=1.41)
+assert torch.allclose(torch.from_numpy(cl_ref).cuda(), cl_gpu, rtol=1e-4, atol=1e-8), \
+    "map2cl_torch output does not match CPU map2cl"
+```
+(Loose `rtol=1e-4` tolerates float32 vs float64 accumulation differences.)
+
+This computes all N power spectra in a single batched FFT call, avoiding the Python
+loop over N maps that the CPU version requires.
 
 **Minkowski tensor binarisation on GPU**
 
@@ -605,11 +854,17 @@ distribute N maps across GPUs with `torch.multiprocessing`:
 import torch.multiprocessing as mp
 
 def _worker(rank, maps_chunk, result_queue, fn, kwargs):
+    """fn must be a torch-native function that accepts a GPU tensor and returns
+    a GPU tensor (e.g. map2cl_torch).  Do NOT pass numpy statistics functions
+    here — they do not accept CUDA tensors."""
     device = torch.device(f"cuda:{rank}")
-    out = fn(torch.tensor(maps_chunk, device=device), **kwargs)
-    result_queue.put((rank, out.cpu().numpy()))
+    inp = torch.from_numpy(maps_chunk).to(device)   # numpy → GPU tensor
+    out = fn(inp, **kwargs)                          # fn returns GPU tensor
+    result_queue.put((rank, out.cpu().numpy()))      # GPU → CPU → numpy
 
 def multi_gpu_eval(maps_nhw, fn, n_gpus=4, **kwargs):
+    """Distribute maps across GPUs. fn must be torch-native (accept/return GPU tensors).
+    For numpy statistics functions use joblib (§3.2) instead."""
     chunks = np.array_split(maps_nhw, n_gpus)
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
@@ -653,7 +908,8 @@ computes its local statistics; rank 0 gathers and merges.
 
 **Install:**
 ```bash
-pip install mpi4py   # uses the system MPI; on CSD3, module load openmpi/4.1 first
+pip install mpi4py   # uses the system MPI; on CSD3 load the appropriate OpenMPI module
+                     # first (exact string varies by partition — check `module avail openmpi`)
 ```
 
 **Generic scatter–compute–gather wrapper:**
@@ -663,29 +919,40 @@ from mpi4py import MPI
 import numpy as np
 
 def mpi_parallel_eval(maps_nhw, fn, **kwargs):
+    """Scatter maps over MPI ranks, compute fn on each chunk, gather results.
+
+    comm.scatter with a list of objects (not a flat numpy buffer) does not
+    require equal chunk sizes — no padding needed.  Error handling uses
+    comm.Abort() to prevent ranks from deadlocking if one raises an exception.
+    """
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
 
-    # Rank 0 scatters map chunks
+    # Rank 0 splits into variable-length chunks; list scatter handles unequal sizes
     if rank == 0:
-        chunks = np.array_split(maps_nhw, size)
-        # pad to equal length so scatter works
-        max_len = max(len(c) for c in chunks)
-        chunks = [np.pad(c, ((0, max_len - len(c)), (0,0), (0,0))) for c in chunks]
-        true_lens = [len(np.array_split(maps_nhw, size)[i]) for i in range(size)]
+        chunks = np.array_split(maps_nhw, size)   # list of arrays, possibly unequal
     else:
         chunks = None
-        true_lens = None
 
-    local_chunk = comm.scatter(chunks, root=0)
-    true_len    = comm.scatter(true_lens, root=0)
-    local_result = fn(local_chunk[:true_len], **kwargs)
+    local_chunk = comm.scatter(chunks, root=0)    # each rank gets its slice
+
+    try:
+        local_result = fn(local_chunk, **kwargs)
+    except Exception as exc:
+        print(f"[rank {rank}] error in fn: {exc}", flush=True)
+        comm.Abort(1)                             # prevents other ranks from hanging
+        raise
 
     all_results = comm.gather(local_result, root=0)
 
     if rank == 0:
-        return _merge(all_results)   # concatenate along N axis
+        # For ndarray results: np.concatenate(all_results, axis=0)
+        # For tuple results (e.g. compute_mfs returns (M0,M1,M2)):
+        #   tuple(np.concatenate([r[i] for r in all_results], axis=0) for i in range(3))
+        # For dict-of-arrays (e.g. compute_minkowski_tensors):
+        #   recurse over leaves with np.concatenate(..., axis=0)
+        return np.concatenate(all_results, axis=0)
 ```
 
 **Run with `mpirun` on a single node:**
@@ -705,29 +972,30 @@ parallelism strategy: `n_nodes × n_cores_per_node` total workers.
 
 ---
 
-### 3.6 Multi-node training with DeepSpeed
+### 3.6 Multi-node training (DEFERRED — post-thesis)
+
+**Status: explicitly deferred per scope triage (§"Deadline and scope triage").
+The dim=64 U-Net fits comfortably in a single Ampere GPU and trains in hours, so
+multi-node training provides no convergence benefit for the current thesis work.
+This section documents the DDP approach for future reference.**
 
 Current training uses single-node, single-GPU (`accelerate launch --num_processes 1`).
-Scale to multi-node with DeepSpeed ZeRO-2 (optimizer state partitioning, no parameter
-sharding needed at this model size):
+The appropriate multi-GPU / multi-node strategy for this model size is
+**DDP (DistributedDataParallel)**, not DeepSpeed ZeRO, because:
+- The dim=64 U-Net has ~50 M parameters; all fit in VRAM without sharding
+- ZeRO-2 optimizer state partitioning adds communication overhead with no memory benefit
+- DDP scales linearly for gradient synchronisation without the DeepSpeed dependency
 
-**`accelerate config` for multi-node:**
+**`accelerate config` for multi-node DDP:**
 ```yaml
 compute_environment: LOCAL_MACHINE
-distributed_type: DEEPSPEED
-deepspeed_config:
-  deepspeed_multinode_launcher: standard
-  gradient_accumulation_steps: 1
-  zero_optimization:
-    stage: 2
-    allgather_partitions: true
-    reduce_scatter: true
-    overlap_comm: true
+distributed_type: MULTI_GPU
 num_machines: 4
 num_processes: 16   # 4 nodes × 4 GPUs each
 machine_rank: 0     # override per node via SLURM env var
 main_process_ip: <head_node_ip>
 main_process_port: 29500
+mixed_precision: fp16
 ```
 
 **`train_slurm_multinode.sh`:**
@@ -736,9 +1004,9 @@ main_process_port: 29500
 #SBATCH --job-name=cmb_multinode
 #SBATCH --account=mphil-dis-sl2-gpu
 #SBATCH --nodes=4
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks-per-node=1   # one launcher per node; accelerate manages all 4 local GPUs
 #SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=32
 #SBATCH --mem=128G
 #SBATCH --time=2-00:00:00
 #SBATCH --partition=ampere
@@ -752,16 +1020,19 @@ srun accelerate launch \
     --machine_rank $SLURM_NODEID \
     --main_process_ip $HEAD_NODE \
     --main_process_port 29500 \
-    --deepspeed_config_file deepspeed_config.json \
     train.py --run-name "$RUN_NAME"
 ```
 
-The key `srun` invocation launches one `accelerate` process per task; SLURM
-populates `$SLURM_NODEID` automatically for each node in the allocation.
+`--ntasks-per-node=1` ensures `srun` launches exactly one task (one `accelerate launch`
+process) per node. `accelerate` then spawns 4 sub-processes internally (16 total / 4 nodes).
+Setting `--ntasks-per-node=4` would cause `srun` to start 4 competing launchers per node,
+each trying to own all 4 GPUs and all sharing the same `$SLURM_NODEID`, resulting in 64
+conflicting processes. SLURM populates `$SLURM_NODEID` (0-indexed node rank) automatically.
 
-At this model size (U-Net, dim=64), multi-node training is not essential for
-convergence speed — but it becomes beneficial when experimenting with `dim=128`
-or larger patch sizes.
+**Note on Ampere GPU variants:** CSD3 Ampere nodes are predominantly 80 GB A100s; some
+partitions have 40 GB variants. The dim=64 U-Net is comfortable in either. If experimenting
+with `compute_scattering_covariance` (which builds a large intermediate tensor), confirm
+available VRAM with `nvidia-smi` before running and reduce batch size if needed.
 
 ---
 
@@ -792,7 +1063,12 @@ TASK_ID=$SLURM_ARRAY_TASK_ID
 CHECKPOINT="results/run_v1/model-$((TASK_ID * 5 + 5)).pt"   # checkpoints 5, 10, ..., 50
 OUTPUT="results/eval/stats_milestone_${TASK_ID}.npz"
 
-source ~/diffusion_project_env/bin/activate
+# Activate the project venv (script lives in home directory)
+source "$HOME/activate_diffusion_project_env.sh"
+
+# eval.py must be created as part of Phase 3 (§3.10 step 5).
+# It should accept --checkpoint, --output, and --n-jobs and run all
+# evaluation statistics from §2.2 on the generated samples.
 python foregrounds_diffusion/eval.py \
     --checkpoint "$CHECKPOINT" \
     --output "$OUTPUT" \
@@ -827,16 +1103,24 @@ DataLoader(
 
 **Lustre striping on CSD3** (relevant if data lives on `/rds/` or `/sptlocal/`):
 ```bash
-lfs setstripe -c 4 data/low_pass/   # stripe across 4 OSTs for parallel reads
+lfs setstripe -c 4 data/low_pass/   # set stripe count for the directory
 ```
-This pre-fragments the `.npy` files across storage servers so multiple workers
-can read simultaneously without contention.
+**Important:** `lfs setstripe` only applies to **new files** created in the directory
+after the command runs. Existing `.npy` files retain their original stripe layout.
+To stripe existing files, copy them through the newly-striped directory:
+```bash
+lfs setstripe -c 4 /rds/project/<project>/data_striped/
+cp data/low_pass/*.npy /rds/project/<project>/data_striped/
+```
+This pre-fragments the `.npy` files across storage servers so multiple DataLoader
+workers can read simultaneously without contention.
 
 ---
 
 ### 3.9 Parallelisation benchmarks
 
-Extend `docs/tutorials/13_benchmarks.ipynb` with a Section 8 covering parallel
+Extend `docs/tutorials/13_benchmarks.ipynb` with **Section 8 — Parallel scaling**
+(add this section to the notebook structure defined in §2.4) covering parallel
 scaling. New figures to add:
 
 **Figure 11 — Strong scaling: time vs n_workers (fixed N=500, 256²)**
@@ -897,10 +1181,10 @@ Also add a **parallel scaling summary table** to the benchmark notebook:
 
 1. Add `n_jobs` parameter to all functions in §3.2 (one PR per module)
 2. Benchmark `joblib` parallel on local machine (Figure 11, 12)
-3. Port `map2cl` to torch; benchmark GPU speedup (Figure 14)
+3. Port `map2cl` to torch; benchmark GPU speedup (Figure 14) — requires CPU baselines from §2.2 sweeps
 4. Write `mpi4py` wrapper and test on 2 CSD3 nodes (Figure 13)
-5. Write `eval_slurm_array.sh` and validate with 3 checkpoints
-6. Add `train_slurm_multinode.sh` and `deepspeed_config.json`; validate on 2 nodes
+5. Create `foregrounds_diffusion/eval.py` (CLI: `--checkpoint`, `--output`, `--n-jobs`; runs all §2.2 statistics on generated samples); then write `eval_slurm_array.sh` and validate with 3 checkpoints
+6. Add `train_slurm_multinode.sh` (DDP, no DeepSpeed); validate on 2 nodes — **deferred post-thesis** per scope triage
 7. Benchmark multi-GPU evaluation (Figure 15)
 
 ---
@@ -938,6 +1222,11 @@ docs/
 
 **`docs/conf.py` key settings:**
 ```python
+import sys, os
+# Allow autodoc to find the package source without installing it as a package.
+# Required when RTD installs only docs/requirements.txt (no `pip install .`).
+sys.path.insert(0, os.path.abspath('..'))
+
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",      # NumPy docstring support
@@ -947,6 +1236,22 @@ extensions = [
     "sphinx_copybutton",
 ]
 html_theme = "furo"             # clean, mobile-friendly
+
+# Mock heavy packages that are not installed on RTD.
+# autodoc_mock_imports prevents import errors at Sphinx build time but does NOT
+# prevent pip from installing those packages if they appear in install dependencies —
+# that is why the .readthedocs.yaml must NOT install the package itself (see §4.3).
+autodoc_mock_imports = [
+    "torch", "torch.fft", "torch.multiprocessing",
+    "healpy", "accelerate",
+    "denoising_diffusion_pytorch",
+    "numba", "quantimpy", "kymatio",
+    "astropy",
+]
+
+# Do not re-execute notebooks on RTD — they require FITS data not available there.
+# Notebooks should be committed with pre-executed outputs.
+nbsphinx_execute = "never"
 ```
 
 **`docs/requirements.txt`:**
@@ -956,6 +1261,9 @@ furo
 nbsphinx
 sphinx-copybutton
 sphinx-autodoc-typehints
+# lightweight scientific stack — available on RTD ubuntu-22.04 without GPU deps
+numpy>=1.26
+scipy>=1.10
 ```
 
 ### 4.3 ReadTheDocs configuration
@@ -969,9 +1277,11 @@ build:
     python: "3.11"
 python:
   install:
-    - method: pip
-      path: .
-      extra_requirements: [docs]
+    - requirements: docs/requirements.txt
+    # Do NOT use `method: pip / path: .` here — that would install the package
+    # including all its core dependencies (torch, healpy, etc.) from
+    # [project.dependencies], even when extra_requirements: [docs] is set.
+    # The sys.path.insert in conf.py makes the source importable without install.
 sphinx:
   configuration: docs/conf.py
 ```
@@ -980,7 +1290,8 @@ RTD rebuilds automatically on every push to `main` via a GitHub webhook that RTD
 installs when you connect the repo. No extra CI step is needed — RTD polls GitHub
 or receives the webhook and triggers its own build pipeline.
 
-Add `[docs]` optional dependency group to `pyproject.toml`:
+Add `[docs]` optional dependency group to `pyproject.toml` (used for local doc
+builds and CI; NOT used by RTD — RTD uses `docs/requirements.txt` directly):
 ```toml
 [project.optional-dependencies]
 docs = ["sphinx>=7", "furo", "nbsphinx", "sphinx-copybutton",
@@ -989,11 +1300,12 @@ docs = ["sphinx>=7", "furo", "nbsphinx", "sphinx-copybutton",
 
 ### 4.4 ReadTheDocs setup steps
 
-1. Push `.readthedocs.yaml` and `docs/conf.py` to GitHub
+1. Push `.readthedocs.yaml` and `docs/conf.py` to GitHub (ensure `autodoc_mock_imports` and `nbsphinx_execute = "never"` are set as in §4.2)
 2. Go to readthedocs.org → Import project → connect `AlexBM173/cmb_foregrounds_diffusion`
 3. Set default branch to `main`; enable "build on every push"
-4. Trigger first build; fix any autodoc import errors (common: missing optional deps)
-5. Add RTD badge to `README.md`
+4. Trigger first build; if autodoc still raises `ImportError`, add the failing package to `autodoc_mock_imports` in `conf.py`
+5. To build versioned docs for a tagged release (e.g. `v0.1.0`), go to RTD → Versions → activate the tag — RTD does not auto-activate new tags
+6. Add RTD badge to `README.md`
 
 ### 4.5 Content plan
 
@@ -1017,8 +1329,8 @@ no pre-built wheel is available for the target platform.
 
 **Wheel (bdist_wheel):** a pre-built `.whl` archive. For pure-Python packages (no
 Cython) this is a single `py3-none-any` wheel. If Cython extensions are added
-(Phase 2.4), platform-specific wheels (`linux_x86_64`, `macosx_arm64`, etc.) must
-be built separately — use `cibuildwheel` for this (see §4.3).
+(§2.6g), platform-specific wheels (`linux_x86_64`, `macosx_arm64`, etc.) must
+be built separately — use `cibuildwheel` for this (see §5.3).
 
 Build both with:
 ```bash
@@ -1085,7 +1397,7 @@ With Cython extensions, add to `.github/workflows/publish.yml`:
     package-dir: .
     output-dir: dist
   env:
-    CIBW_BUILD: "cp311-*"
+    CIBW_BUILD: "cp311-* cp312-*"   # match the Python versions in the CI test matrix (§6.3)
     CIBW_ARCHS_LINUX: "x86_64"
     CIBW_ARCHS_MACOS: "arm64 x86_64"
 ```
@@ -1096,14 +1408,18 @@ Always do a dry run on TestPyPI first:
 ```bash
 pip install twine
 twine upload --repository testpypi dist/*
-pip install --index-url https://test.pypi.org/simple/ foregrounds-diffusion
+# --extra-index-url is required because TestPyPI does not mirror all dependencies
+pip install --index-url https://test.pypi.org/simple/ \
+            --extra-index-url https://pypi.org/simple/ \
+            foregrounds-diffusion
 ```
 Verify the install works cleanly before uploading to production PyPI.
 
 ### 5.5 PyPI publish via GitHub Actions
 
-Create a PyPI API token (pypi.org → Account settings → API tokens), store it as
-`PYPI_API_TOKEN` in the GitHub repo secrets, then add:
+Use OIDC Trusted Publisher (preferred — no long-lived secret stored in GitHub).
+Set this up at pypi.org → Publishing → Add a pending publisher before running the
+workflow for the first time. Then add:
 
 ```yaml
 # .github/workflows/publish.yml
@@ -1139,7 +1455,7 @@ because no long-lived secret is stored in GitHub.
 2. `git tag v0.1.0 && git push --tags`
 3. GitHub Actions builds sdist + wheel, waits for manual approval in the `pypi`
    environment, then publishes
-4. RTD picks up the tag and builds versioned docs (`v0.1.0` alongside `latest`)
+4. Manually activate the tag version in RTD (readthedocs.org → Versions → activate `v0.1.0`) so versioned docs are built alongside `latest`
 5. Create a GitHub Release from the tag with release notes
 
 ---
@@ -1148,8 +1464,10 @@ because no long-lived secret is stored in GitHub.
 
 ### 6.1 Current state
 
-The `.github/workflows/tests.yml` stub from Phase 1 covers the basics. The full
-pipeline below replaces and extends it.
+No `.github/workflows/` directory exists yet. As part of Phase 1 infrastructure,
+create the directory and add a minimal `tests.yml` stub (just `pytest tests/ -v`)
+before writing the first unit tests — this ensures tests run in CI from the first
+commit. The full workflow below replaces that stub.
 
 ### 6.2 Recommended workflow files
 
@@ -1284,18 +1602,19 @@ Catches lint errors locally before they reach CI, keeping the feedback loop tigh
 
 ## Sequencing recommendation
 
+Items 1–6 are within the 4-day thesis window (no slack — MVT subset only); items 7–14 are post-submission.
+
 1. **CI foundation** — `tests.yml` + `lint.yml` + branch protection. Low effort, high value.
 2. **Tests** — write `conftest.py` and unit tests for `flatmaps`, `moments`, `morphology`.
 3. **Baseline profiling** — run §2.2 sweeps and produce Figures 1–4; record in benchmark notebook.
-4. **Single-core optimisations** — Numba JIT, NumPy vectorisation, cKDTree; re-profile for Figures 5–9.
-5. **`n_jobs` parallelisation** — add to all functions in §3.2; produce strong/weak scaling plots (Figures 11–12).
-6. **GPU ports** — `map2cl_torch` and minkowski binarisation; produce Figure 14.
-7. **MPI wrapper + eval SLURM array job** — test on 2 CSD3 nodes; produce Figure 13.
-8. **Multi-node training SLURM script** — validate on 2 nodes; only if single-node training is the bottleneck.
+4. **Single-core optimisations** — NumPy vectorisation (§2.6b) and ℓ-bin precompute (§2.6c) first; Numba JIT (§2.6a) only if profiling confirms the accumulation is the bottleneck; re-profile for Figures 5–9.
+5. **`n_jobs` parallelisation** — add to `compute_minkowski_tensors` and `compute_cross_moments` first (§3.2 minimum viable); extend to other functions if time permits; produce strong/weak scaling plots (Figures 11–12).
+6. **GPU ports** — `map2cl_torch` with equivalence test (§3.3); produce Figure 14.
+7. **(Deferred) MPI wrapper + eval SLURM array job** — test on 2 CSD3 nodes; produce Figure 13.
+8. **(Deferred) Multi-node training SLURM script** — DDP config (§3.6); validate on 2 nodes.
 9. **Docstring audit** — prerequisite for useful API docs.
-10. **Sphinx + RTD skeleton** — get a basic build passing; RTD auto-updates on push from this point.
-11. **`pyproject.toml` audit + TestPyPI** — dry-run the publish workflow.
-12. **PyPI publish** — tag `v0.1.0`; set up Trusted Publisher; release.
-13. **Cython** — only if Numba JIT is insufficient.
-14. **Additional CI items** — add dependency pinning, notebook smoke tests, `towncrier`
-    incrementally as the project matures.
+10. **(Deferred) Sphinx + RTD skeleton** — get a basic build passing.
+11. **(Deferred) `pyproject.toml` audit + TestPyPI** — dry-run the publish workflow.
+12. **(Deferred) PyPI publish** — tag `v0.1.0`; set up Trusted Publisher; release.
+13. **(Deferred) Cython** — only if Numba JIT is insufficient.
+14. **(Deferred) Additional CI items** — dependency pinning, notebook smoke tests, `towncrier`.

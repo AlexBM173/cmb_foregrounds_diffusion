@@ -1,8 +1,9 @@
 # Development Plan
 
-Six-phase plan covering a full test suite, profiling and optimisation, parallelisation,
+Seven-phase plan covering model extensions, a full test suite, profiling and optimisation, parallelisation,
 public documentation, package distribution, and CI/CD. Phases are largely independent,
 with the following ordering constraints:
+- Phase 0 (model extensions) is the highest thesis priority and runs concurrently with Phase 1
 - Phase 1 (tests) should precede Phase 2 (profiling) so regressions are caught during optimisation
 - Phase 2 baseline measurements should be complete before Phase 3 (parallelisation) benchmarks are run
 - Phase 4 (docs) should be reasonably complete before Phase 5 (PyPI)
@@ -11,17 +12,23 @@ with the following ordering constraints:
 
 ## Deadline and scope triage
 
-**Thesis deadline: 2026-07-01 (4 days from current date; no slack beyond the MVT subset).**
-The thesis is the primary deliverable. Phases 1–3 provide methodological rigour
-and are partially completable in the remaining time. Phases 4–6 are engineering
-polish that must be deferred beyond submission.
+**Thesis deadline: 2026-07-08 (10 days from current date).**
+The thesis is the primary deliverable. Phase 0 (model extensions) produces the core scientific results
+and must be completed first. Phases 1–3 provide methodological rigour and are partially completable
+in the remaining time. Phases 4–6 are engineering polish that must be deferred beyond submission.
 
-### Effort estimates (4-day window)
+### Effort estimates (10-day window)
 
 | Phase / section | Estimated effort | Priority |
 |---|---|---|
+| §0.1 DDIM sampling curve | 0.5 day (no retraining) | Must-do |
+| §0.2 Min-SNR loss weighting | 1 day | Must-do |
+| §0.3 Self-conditioning | 1.5 days | Must-do |
+| §0.4 Offset noise | 1 day | Must-do |
+| §0.5 Combined final run | 1.5 days | Must-do |
+| §3.10 step 5 `eval.py` creation | 0.5 day | Must-do (Phase 0 dependency; create alongside §0.1) |
 | §1.1–1.3 Infrastructure + unit tests (flatmaps, moments, morphology) | 1.5 days | Must-do |
-| §2.1–2.3 Profiling baseline sweeps | 0.5 day | Must-do |
+| §2.1–2.3 Profiling baseline sweeps | 0.5 day | Should-do |
 | §2.4 Benchmark notebook skeleton | 0.5 day | Should-do |
 | §2.6b–c NumPy vectorisation + ℓ-bin precompute | 0.5 day | Should-do (no external deps) |
 | §3.2 `n_jobs` on two bottleneck functions | 0.5 day | Should-do |
@@ -32,6 +39,8 @@ polish that must be deferred beyond submission.
 ### Minimum-viable-thesis subset
 
 The following is sufficient to support all evaluation claims in the thesis:
+
+0. All of Phase 0 (§0.1–0.6) — the model extension experiments are the primary scientific contribution.
 
 1. Phase 1 tests for `flatmaps`, `moments`, and `morphology` (the three modules
    invoked in every evaluation notebook). Tests for `stacking`, `peak_counts`, and
@@ -59,6 +68,300 @@ The following are explicitly **deferred past the thesis deadline**:
 
 ---
 
+## Phase 0 — DDPM Model Extensions
+
+These experiments are the core scientific contribution of the thesis and take priority over all
+engineering phases. All four extensions are natively supported by `denoising-diffusion-pytorch`.
+
+**Baseline:** `objective='pred_v'` (v-prediction), `beta_schedule='sigmoid'`, 1000 timesteps,
+`auto_normalize=False`. These are library defaults — not set explicitly in `train.py`.
+
+**Baseline checkpoint for §0.1:** use the best existing trained checkpoint (most recent run at
+the highest training step); no retraining required.
+
+**Baseline for §0.2–0.4 ablations:** submit a 100k-step baseline run (`--run-name baseline_100k`,
+no extra kwargs) to the cluster alongside the first ablation run so all comparisons are at equal
+training budget. Do not compare a 100k-step ablation against the existing production checkpoint
+(which may differ in training steps).
+
+**Training wall-clock estimate:** before queuing all ablation jobs, run a 5-minute pilot
+(`--steps 200`) and measure throughput in steps/sec via the WandB `train/steps_per_sec` metric
+or `squeue --format="%M"`. At ~3 it/s on one A100 (dim=64, batch=8, 256×256 patches), 100k
+steps takes approximately 9 hours; the §0.3 self-conditioning run adds ~25% per-step overhead
+(~11 hours) due to the extra forward pass on half of training batches. Actual throughput can
+vary by 2× depending on queue placement and whether a 40 GB or 80 GB A100 is allocated. Use
+the pilot measurement to confirm before locking in the timeline.
+
+**Controls:** every ablation run uses the same random seed, the same 80/10/10 data split, and
+the same augmentation settings as `baseline_100k`. Only the single flagged kwarg differs between
+`baseline_100k` and the ablation run.
+
+---
+
+### 0.1 DDIM fast sampling (no retraining required)
+
+Add `sampling_timesteps=N` to `GaussianDiffusion` in `sample.py`. The library defaults to
+`ddim_sampling_eta=0.0` (fully deterministic), which is correct.
+
+```python
+diffusion = GaussianDiffusion(
+    model, image_size=256, timesteps=1000,
+    auto_normalize=False,
+    sampling_timesteps=50,   # add this
+)
+```
+
+**Experiments:**
+- Sample at T_sample ∈ {10, 25, 50, 100, 250, 1000} steps from the best existing checkpoint
+- Evaluate each using the statistics pipeline (power spectra, Minkowski tensors, cross-moments)
+- Plot sample quality metrics vs sampling steps; identify the knee where quality plateaus.
+  **Knee definition (three-metric, all must hold simultaneously):** the knee is the smallest
+  T_sample at which all three of the following conditions are met relative to the T_sample=1000
+  reference. Because the power spectrum is dominated by steep low-ℓ modes and plateaus early,
+  using C_ℓ alone would under-resolve morphological anisotropy (W012 β) and higher-order
+  structure (S3/S4), which plateau at higher step counts:
+  (a) Mean fractional C_ℓ error: |C_ℓ^DDPM − C_ℓ^AGORA| / C_ℓ^AGORA averaged over all
+  ℓ-bins (100 ≤ ℓ ≤ 10000) and both channels — within 5% of the T_sample=1000 value.
+  (b) Mean W012 β summary statistic: mean of the W012 Minkowski tensor β values across all
+  threshold levels — within 5% of the T_sample=1000 value.
+  (c) Mean |S3| cross-moment ratio: mean of |S3| (skewness cross-moments, all channel
+  combinations from `compute_cross_moments`) across all ℓ-bands — within 5% of the
+  T_sample=1000 value.
+  If the three metrics plateau at different step counts, take the **largest** of the three
+  individually-satisfying T_sample values as the adopted knee.
+
+**Expected result:** quality plateaus around 50–100 steps; ~20× speedup over 1000-step sampling.
+Do this first — it gives an immediate result and makes all subsequent retraining experiments cheaper to evaluate.
+
+**DDIM knee re-verification:** the knee identified here applies to the baseline architecture.
+Before using 50 steps as the fixed sampling budget for the §0.3 self-conditioning model,
+re-run the T_sample sweep on that checkpoint; self-conditioning changes the learned
+reverse-process posterior and may shift the plateau to a different step count.
+
+---
+
+### 0.2 Min-SNR loss weighting
+
+Set `min_snr_loss_weight=True` (γ=5, the library default). Addresses the instability where
+high-noise timesteps dominate the loss under v-prediction.
+
+```python
+diffusion = GaussianDiffusion(
+    model, image_size=256, timesteps=1000,
+    auto_normalize=False,
+    min_snr_loss_weight=True,
+    min_snr_gamma=5,
+)
+```
+
+**Experiments:**
+- Train for 100k steps alongside the baseline (same architecture, same seed)
+- Compare training loss curves (WandB) and final statistics at the same checkpoint interval
+- Expected: faster convergence and more stable late-stage training loss
+
+**Win criterion:** adopted if (a) the unweighted validation MSE on x₀ — mean squared error on
+the predicted clean image, averaged over all pixels and both channels, with no SNR reweighting
+applied — at the 100k-step checkpoint is ≤ that of `baseline_100k`; and (b) the CIB and tSZ
+auto-power spectrum χ² vs the AGORA mean, using a diagonal covariance estimated from the AGORA
+sample variance per ℓ-bin, does not increase relative to `baseline_100k`. Training losses must
+not be compared directly: min-SNR reweighting changes the loss objective and makes raw loss
+values incommensurable across runs. Both conditions (a) and (b) must hold.
+
+---
+
+### 0.3 Self-conditioning
+
+Set `self_condition=True` on `Unet`. The model receives its previous x̂₀ estimate as an
+additional input channel; during training, half of batches use a zeroed prior estimate so the
+model works without it at test time.
+
+```python
+model = Unet(
+    dim=64, dim_mults=(1, 2, 4, 8), channels=2,
+    flash_attn=True,
+    self_condition=True,   # add this
+)
+```
+
+**Cost:** ~25% longer per training step due to the extra forward pass on half of batches.
+**Experiments:**
+- Train for 100k steps; compare power spectra, Minkowski tensor β distributions, cross-moments
+- Self-conditioning can be combined with min-SNR in a single run to save GPU time (see §0.5)
+
+**Win criterion:** adopted if the two-sample KS statistic D on the **W012** Minkowski tensor
+β distribution — W012 is the adopted scalar because it tracks boundary-normal alignment and is
+the most sensitive to elongated filamentary structures; where D is the maximum absolute
+difference between empirical CDFs; lower D means closer to the AGORA distribution — is smaller
+than `baseline_100k` for at least two of the three threshold tertiles (low / mid / high),
+evaluated on N=500 generated samples. The KS p-value must not be used as the selection
+criterion: p-values are sensitive to sample size and ranking models by p-value is
+statistically unsound.
+
+---
+
+### 0.4 Offset noise
+
+Set `offset_noise_strength=0.1`. Adds a spatially uniform noise component to each noisy sample,
+preserving large-scale (low-ℓ) structure in the training signal. Physically motivated for CMB
+foreground maps where power spectra are steep and large-scale modes carry most of the signal.
+
+```python
+diffusion = GaussianDiffusion(
+    model, image_size=256, timesteps=1000,
+    auto_normalize=False,
+    offset_noise_strength=0.1,
+)
+```
+
+**Experiments:**
+- Train for 100k steps; compare low-ℓ power spectrum recovery specifically
+- Also evaluate Minkowski tensor anisotropy at large scales and CIB×tSZ cross-spectrum
+- Sweep `offset_noise_strength` ∈ {0.05, 0.1, 0.2} if GPU budget allows
+
+**Win criterion:** adopted if the fractional power-spectrum error at ℓ ∈ [100, 500] (mean over
+both channels, computed as |Cl_DDPM − Cl_AGORA| / Cl_AGORA averaged over ℓ-bins in this range)
+is reduced by ≥ 20% relative to `baseline_100k`. For this specific comparison call `map2cl`
+with `minbin=60` (not the default 100) so that modes down to the 6° field fundamental mode
+(ℓ ≈ 60) are measured; add a corresponding note in `eval.py` to use `minbin=60` when computing
+the offset-noise win criterion. The lower bound of the criterion range is stated as ℓ=100 (the
+default pipeline floor); modes at ℓ < 60 are below the fundamental mode of a 6° patch and
+cannot be recovered regardless of minbin.
+
+---
+
+### 0.5 Combined best-of-all run
+
+Once individual ablations identify winning settings, train a final model combining all
+improvements:
+
+```python
+model = Unet(
+    dim=64, dim_mults=(1, 2, 4, 8), channels=2,
+    flash_attn=True,
+    self_condition=True,
+)
+diffusion = GaussianDiffusion(
+    model, image_size=256, timesteps=1000,
+    auto_normalize=False,
+    min_snr_loss_weight=True,
+    min_snr_gamma=5,
+    offset_noise_strength=0.1,
+    sampling_timesteps=50,
+)
+```
+
+This becomes the primary thesis result model. All final evaluations use DDIM at 50 steps.
+
+**Gating:** §0.5 cannot be submitted until the §0.2–0.4 results are reviewed and the winning
+kwargs are confirmed. Schedule ~0.5 day of review between the last ablation checkpoint becoming
+available and submitting the combined job.
+
+---
+
+### 0.6 Evaluation protocol
+
+All extension experiments use the same evaluation pipeline:
+
+0. **Renormalise to physical units.** Generated samples are in normalised space (CIB in [0,1];
+   tSZ std-normalised). Before any statistic is computed, apply
+   `renormalize_dm_maps(ddpm_samples, train_maps)` to convert DDPM output to physical units
+   using the training-set reference. The AGORA reference maps must be loaded in physical units
+   (not re-normalised). This step is mandatory; failure to renormalise is a known inconsistency
+   flagged in `docs/paper_code_inconsistencies.md` and must not be repeated in the thesis
+   evaluation.
+1. Generate N=500 samples using DDIM at the step count established by §0.1 (initial estimate:
+   50 steps; the three-metric knee criterion in §0.1 may revise this upward)
+2. Run the full statistics pipeline: `mean_cls`, `compute_cross_moments`,
+   `compute_minkowski_tensors`, `compute_mfs` (Minkowski functionals V0/V1/V2; requires
+   `quantimpy`), `compute_peak_minima_counts`. Run `compute_scattering_covariance` (kymatio
+   backend) if kymatio is installed on the cluster — verify with
+   `python -c "import kymatio"` before submitting; if unavailable, document the omission
+   explicitly in the thesis. tSZ cluster stacking (`select_snr_pixels` + `extract_cutouts` +
+   `radial_profile`) is expensive (requires per-sample SNR maps) and is deferred to the §0.5
+   combined model only — run it once on the best model after the ablation write-up is complete,
+   not on every ablation checkpoint.
+3. Compare to the AGORA training-set distributions using the same pipeline
+3b. Compare to a **Gaussian baseline**: generate N=500 Gaussian realisations with the same
+    auto- and cross-power spectra as the AGORA training set, using `make_gaussian_realisation`
+    with measured `el`, `cl_cib`, `cl_tsz`, `cl_cross` as inputs. Run the identical statistics
+    pipeline on these realisations. This three-way comparison (DDPM / Gaussian / AGORA) quantifies
+    how much non-Gaussian structure the model captures beyond what a matched Gaussian model
+    would reproduce — this is the central scientific claim of the thesis.
+4. Produce figures:
+   - Power spectra: CIB auto, tSZ auto, CIB×tSZ cross (log-log, with training set 1σ band and Gaussian baseline)
+   - Minkowski tensor β distributions per threshold (DDPM vs Gaussian vs AGORA): W012 as the
+     primary figure (boundary-normal alignment; most sensitive to elongated structures); W200
+     and W201 as supplementary panels (area-weighted and second-order curvature anisotropy).
+     All three tensors are evaluated; omitting W200/W201 from the main figures must be
+     explicitly noted in the thesis with the reasoning that W012 is the most physically
+     interpretable scalar for filamentary foreground structure
+   - Minkowski functionals V0/V1/V2 vs threshold (DDPM vs Gaussian vs AGORA)
+   - Cross-moment histograms (S3, S4 for each channel combination)
+   - Scattering covariance comparison (if kymatio available; otherwise omit and note in thesis)
+   - tSZ cluster stack (§0.5 combined model only)
+   - DDIM quality-vs-steps curve (§0.1 only)
+
+**Run naming convention:** use `--run-name` to label each ablation, e.g.
+`min_snr_v1`, `self_cond_v1`, `offset_noise_v1`, `combined_v1`.
+
+**Dependency:** this protocol requires `foregrounds_diffusion/eval.py` (§3.10 step 5) to exist
+before Phase 0 evaluation begins. Create `eval.py` during the §0.1 inference window (day 1–2);
+it is a Must-do prerequisite, not an optional Phase 3 item (see triage table). The Phase 0
+deliverable is a single-core version of `eval.py`; implement `--n-jobs` defaulting to 1 so the
+script is usable immediately without §3.2 being complete. The `n_jobs` parallelisation (§3.2)
+is a deferred Phase 3 item — `eval_slurm_array.sh` with `--n-jobs 16` is not available until
+§3.2 is delivered.
+
+**Results storage:** each ablation saves statistics to `results/eval/{run_name}_stats.npz`
+containing arrays: `el`, `cl_mean`, `cl_std`, `moments_out`, `labels`, `beta_W012`,
+`theta_W012`, `beta_W200`, `theta_W200`, `beta_W201`, `theta_W201`, `peak_counts`,
+`gaussian_cl_mean`, `gaussian_moments_out`. All three Minkowski tensors are stored; dropping
+W200 and W201 would discard two-thirds of the morphological anisotropy signal. This layout
+supports direct loading for thesis figure generation without post-processing.
+
+**Computation time:** evaluating N=500 maps through the full pipeline (cross-moments +
+Minkowski tensors + MFs + peak counts) takes approximately 3–6 hours on a single CPU core
+(the MFs add ~50% overhead relative to an earlier estimate that omitted them). Without
+`--n-jobs`, run on a compute node via a short interactive SLURM session — do not run on a
+login node. Once §3.2 is complete, `eval_slurm_array.sh` with `--n-jobs 16` reduces this
+to ~15–30 minutes.
+
+---
+
+### 0.7 Timeline (10 days to July 8)
+
+| Task | Effort days | GPU |
+|---|---|---|
+| §0.1 DDIM sampling curve | 0.5 | ~1 hr inference only |
+| §0.2 Min-SNR training run | 1.0 | 1 full run |
+| §0.3 Self-conditioning run | 1.5 | ~1.25× run |
+| §0.4 Offset noise run | 1.0 | 1 full run |
+| §0.5 Combined final run | 1.5 | ~1.25× run |
+| Writing up results | 2.0 | — |
+| Buffer / Phase 1 tests | 2.5 | — |
+
+**Effort days vs GPU wall-clock:** the "Effort days" column reflects analysis and write-up
+attention time, not GPU wall-clock. The GPU training runs for `baseline_100k`, §0.2, and §0.4
+are all submitted to the cluster queue on **day 1** and run in parallel (all share the same Unet
+architecture; only GaussianDiffusion kwargs differ). The effort days for §0.2 and §0.4 represent
+the time spent reviewing checkpoints, running `eval.py`, and writing the result sections — not
+sequential GPU usage. §0.3 and §0.5 require the modified Unet and are submitted after the §0.2/§0.4
+jobs complete.
+
+**GPU queue time:** CSD3 Ampere queue wait can be 2–24 hours depending on cluster load. Submit
+the `baseline_100k`, §0.2, and §0.4 jobs on day 1 (all share the same Unet architecture, so
+they can be queued together). Monitor with `squeue -u $USER -p ampere`. If queue wait exceeds
+12 hours, reduce the Buffer row by 0.5 day — the 2.5-day buffer explicitly absorbs expected
+queue delays. Do not start writing up §0.2 results until the job has completed and statistics
+have been computed.
+
+**§0.5 gating:** the combined run cannot be submitted until §0.2–0.4 checkpoints are reviewed
+and win criteria assessed. Allow 0.5 day of review time; this falls within the day-7 write-up
+slot. If the last ablation completes late (day 6 or later), compress writing and buffer
+proportionally.
+
+---
+
 ## Phase 1 — Testing Suite
 
 ### 1.1 Infrastructure
@@ -83,20 +386,21 @@ The following are explicitly **deferred past the thesis deadline**:
   ```
 - **Fixtures (`conftest.py`):**
   - `rng` — seeded `np.random.default_rng(42)`
-  - `flatskymapparams` — `[64, 64, 1.41, 1.41]` (small maps for speed)
-  - `flatskymapparams_256` — `[256, 256, 1.41, 1.41]` (production size, used by benchmark tests)
+  - `flatskymapparams` — `[64, 64, 1.40625, 1.40625]` (small maps for speed)
+  - `flatskymapparams_256` — `[256, 256, 1.40625, 1.40625]` (production size, used by benchmark tests)
   - `gaussian_patch` — single 64×64 Gaussian realisation
   - `patch_stack` — `(16, 64, 64)` stack of Gaussian patches
   - `patch_stack_256` — `(16, 256, 256)` stack of Gaussian patches at production resolution (required by §2.7 benchmark tests)
   - `binary_map` — 64×64 binary excursion set at a fixed threshold
 
 **Pixel-scale convention note:** the canonical pixel scale throughout this project
-is **1.41 arcmin/pixel**, matching the `flatskymapparams` fixture above and the
-hard-coded `dx_arcmin=1.41` in `map2cl_torch` (§3.3). `peak_counts.smooth_map`
-defaults to `pixel_res_arcmin=1.40625` (exact 6°/256 px = 1.40625 arcmin); the
-~0.3% difference is not physically significant but breaks module consistency.
-All test and benchmark calls to `smooth_map` must pass `pixel_res_arcmin=1.41`
-explicitly so every module operates on the same pixel scale.
+is **1.40625 arcmin/pixel** (exact: 6° × 60 arcmin/° ÷ 256 pixels). This value is
+used by `peak_counts.smooth_map` (its default), by the `flatskymapparams` fixtures
+above, by `map2cl_torch` (§3.3), and by tutorials 10, 11, and 12. Tutorials 06, 07,
+and 09 still contain `flatskymapparams = [256, 256, 1.41, 1.41]` — update these to
+1.40625 before running tests or comparisons that cross module boundaries. Do not
+pass `pixel_res_arcmin=1.41` explicitly to `smooth_map`; its default of 1.40625
+is now authoritative.
 
 ### 1.2 Unit tests per module
 
@@ -764,9 +1068,12 @@ def map2cl_torch(maps_nhw: torch.Tensor, lbin_idx_rfft, bin_counts, n_bins,
     fft   = torch.fft.rfft2(maps_nhw)              # (N, H, W//2+1) complex
     power = (fft.real**2 + fft.imag**2) * norm     # (N, H, W//2+1)
     flat  = power.reshape(N, -1)                   # (N, H*(W//2+1))
-    cl    = torch.zeros(N, n_bins, device=maps_nhw.device)
+    # Allocate n_bins+1 so the sentinel index (= n_bins) set by build_lbin_idx_rfft
+    # for out-of-range pixels has a valid write target; scatter_add_ with index n_bins
+    # into an n_bins-wide tensor causes a CUDA index-out-of-bounds crash.
+    cl    = torch.zeros(N, n_bins + 1, device=maps_nhw.device)
     cl.scatter_add_(1, lbin_idx_rfft.expand(N, -1), flat)
-    return cl / bin_counts                          # normalise by hits per bin
+    return cl[:, :n_bins] / bin_counts              # discard sentinel column; normalise by hits
 ```
 
 **Note on `lbin_idx_rfft`:** `torch.fft.rfft2` returns only the non-redundant half
@@ -817,7 +1124,7 @@ from foregrounds_diffusion.flatmaps import map2cl
 
 rng = np.random.default_rng(42)
 maps_np = rng.standard_normal((8, 256, 256)).astype(np.float32)
-mapparams = [256, 256, 1.41, 1.41]
+mapparams = [256, 256, 1.40625, 1.40625]
 
 # CPU reference (per-map, then stack)
 el_ref, cl_ref = zip(*[map2cl(mapparams, m) for m in maps_np])
@@ -825,7 +1132,7 @@ cl_ref = np.stack(cl_ref)   # (8, n_bins)
 
 # GPU port
 maps_t = torch.from_numpy(maps_np).cuda()
-cl_gpu = map2cl_torch(maps_t, lbin_idx_rfft, bin_counts, n_bins, dx_arcmin=1.41)
+cl_gpu = map2cl_torch(maps_t, lbin_idx_rfft, bin_counts, n_bins, dx_arcmin=1.40625)
 assert torch.allclose(torch.from_numpy(cl_ref).cuda(), cl_gpu, rtol=1e-4, atol=1e-8), \
     "map2cl_torch output does not match CPU map2cl"
 ```
@@ -1183,7 +1490,14 @@ Also add a **parallel scaling summary table** to the benchmark notebook:
 2. Benchmark `joblib` parallel on local machine (Figure 11, 12)
 3. Port `map2cl` to torch; benchmark GPU speedup (Figure 14) — requires CPU baselines from §2.2 sweeps
 4. Write `mpi4py` wrapper and test on 2 CSD3 nodes (Figure 13)
-5. Create `foregrounds_diffusion/eval.py` (CLI: `--checkpoint`, `--output`, `--n-jobs`; runs all §2.2 statistics on generated samples); then write `eval_slurm_array.sh` and validate with 3 checkpoints
+5. Create `foregrounds_diffusion/eval.py` (CLI: `--checkpoint`, `--output`, `--n-jobs`,
+   `--agora-maps`, `--n-samples`; generates N DDPM samples from the checkpoint, loads the
+   AGORA training patches from `--agora-maps`, generates a matched Gaussian baseline via
+   `make_gaussian_realisation` using the AGORA measured power spectra, then runs all §2.2
+   statistics on all three sets — DDPM samples, AGORA truth, Gaussian baseline — and saves
+   results to `--output` as an NPZ with the layout from §0.6; this three-way comparison is
+   the primary scientific evaluation from §0.6 and is required before any Phase 0 ablation
+   can be written up); then write `eval_slurm_array.sh` and validate with 3 checkpoints
 6. Add `train_slurm_multinode.sh` (DDP, no DeepSpeed); validate on 2 nodes — **deferred post-thesis** per scope triage
 7. Benchmark multi-GPU evaluation (Figure 15)
 
@@ -1602,19 +1916,23 @@ Catches lint errors locally before they reach CI, keeping the feedback loop tigh
 
 ## Sequencing recommendation
 
-Items 1–6 are within the 4-day thesis window (no slack — MVT subset only); items 7–14 are post-submission.
+Items 1–8 are within the 10-day thesis window; items 9–16 are post-submission.
 
-1. **CI foundation** — `tests.yml` + `lint.yml` + branch protection. Low effort, high value.
-2. **Tests** — write `conftest.py` and unit tests for `flatmaps`, `moments`, `morphology`.
-3. **Baseline profiling** — run §2.2 sweeps and produce Figures 1–4; record in benchmark notebook.
-4. **Single-core optimisations** — NumPy vectorisation (§2.6b) and ℓ-bin precompute (§2.6c) first; Numba JIT (§2.6a) only if profiling confirms the accumulation is the bottleneck; re-profile for Figures 5–9.
-5. **`n_jobs` parallelisation** — add to `compute_minkowski_tensors` and `compute_cross_moments` first (§3.2 minimum viable); extend to other functions if time permits; produce strong/weak scaling plots (Figures 11–12).
-6. **GPU ports** — `map2cl_torch` with equivalence test (§3.3); produce Figure 14.
-7. **(Deferred) MPI wrapper + eval SLURM array job** — test on 2 CSD3 nodes; produce Figure 13.
-8. **(Deferred) Multi-node training SLURM script** — DDP config (§3.6); validate on 2 nodes.
-9. **Docstring audit** — prerequisite for useful API docs.
-10. **(Deferred) Sphinx + RTD skeleton** — get a basic build passing.
-11. **(Deferred) `pyproject.toml` audit + TestPyPI** — dry-run the publish workflow.
-12. **(Deferred) PyPI publish** — tag `v0.1.0`; set up Trusted Publisher; release.
-13. **(Deferred) Cython** — only if Numba JIT is insufficient.
-14. **(Deferred) Additional CI items** — dependency pinning, notebook smoke tests, `towncrier`.
+1. **DDIM sampling curve** (§0.1) — no retraining; immediate result; establishes evaluation protocol for all subsequent runs.
+2. **Min-SNR + offset noise training runs** (§0.2, §0.4) — launch back-to-back; same architecture, different GaussianDiffusion kwargs.
+3. **Self-conditioning run** (§0.3) — requires Unet change; run in parallel with write-up of §0.2/§0.4 results if GPU is available.
+4. **Combined final run** (§0.5) — train after ablations confirm the winning combination.
+5. **CI foundation** — `tests.yml` + `lint.yml` + branch protection. Low effort, high value; can be done while training runs.
+6. **Tests** — write `conftest.py` and unit tests for `flatmaps`, `moments`, `morphology`.
+7. **Baseline profiling** — run §2.2 sweeps and produce Figures 1–4; record in benchmark notebook.
+8. **Single-core optimisations** — NumPy vectorisation (§2.6b) and ℓ-bin precompute (§2.6c) first; Numba JIT (§2.6a) only if profiling confirms the accumulation is the bottleneck; re-profile for Figures 5–9.
+9. **(Deferred) `n_jobs` parallelisation** — add to `compute_minkowski_tensors` and `compute_cross_moments` first (§3.2 minimum viable); produce strong/weak scaling plots (Figures 11–12).
+10. **(Deferred) GPU ports** — `map2cl_torch` with equivalence test (§3.3); produce Figure 14.
+11. **(Deferred) MPI wrapper + eval SLURM array job** — test on 2 CSD3 nodes; produce Figure 13.
+12. **(Deferred) Multi-node training SLURM script** — DDP config (§3.6); validate on 2 nodes.
+13. **Docstring audit** — prerequisite for useful API docs.
+14. **(Deferred) Sphinx + RTD skeleton** — get a basic build passing.
+15. **(Deferred) `pyproject.toml` audit + TestPyPI** — dry-run the publish workflow.
+16. **(Deferred) PyPI publish** — tag `v0.1.0`; set up Trusted Publisher; release.
+17. **(Deferred) Cython** — only if Numba JIT is insufficient.
+18. **(Deferred) Additional CI items** — dependency pinning, notebook smoke tests, `towncrier`.

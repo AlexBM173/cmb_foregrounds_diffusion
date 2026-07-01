@@ -15,28 +15,36 @@ with the following ordering constraints:
 All phases are pre-submission. Phase 0 (model extensions requiring HPC) is excluded
 because the cluster is down. Phases 1–6 are all in scope.
 
+**Top open risk:** the normalisation scheme is contested between notebooks 03 and 06
+(inconsistency #7 in `docs/paper_code_inconsistencies.md`) and must be resolved on the
+cluster before any statistic's absolute amplitude is trusted — see the ⚠ BLOCKER in the
+Cluster action plan below.
+
 ### Status
 
 | Phase / section | Status |
 |---|---|
-| §1 Full unit + integration test suite | ✅ Complete (125 tests, 11 benchmarks) |
+| §1 Full unit + integration test suite | ✅ Complete — 185 tests (180 pass, 5 skip); §2.6 equivalence gate now runs in CI |
 | §2.1–2.3 Profiling baseline sweeps | ✅ Complete |
-| §2.4 Benchmark notebook | ✅ Complete |
+| §2.4 Benchmark notebook | ✅ Complete (top-4 bottlenecks; stacking/scattering 2e–2f deprioritised) |
 | §2.6a Numba JIT | ✅ Skipped — scipy owns 67% of cost, accumulation < 3% |
 | §2.6b–c NumPy vectorisation + ℓ-bin precompute | ✅ Complete |
 | §2.6f `torch.compile` sampling | ✅ Complete (opt-in `--compile` flag) |
-| §3.2 `n_jobs` on two bottleneck functions | ✅ Complete |
+| Post-sampling rescaling (inconsistency #4) | ✅ Opt-in `--rescale-cib`/`--rescale-tsz` flags added (off by default); apply/omit decision deferred to cluster day |
+| Test hardening | ✅ Distinct-channel cross-moment tests + non-Gaussian (lognormal) fixture added |
+| §3.2 `n_jobs` parallelisation (all functions) | ✅ Complete |
 | §3.3 GPU port `map2cl_torch` | ✅ Complete |
+| §3.9 Parallel benchmarks | ◑ Partial — Fig 11 (strong scaling) + summary table done on local CPU; Figs 12–15 cluster-dependent |
 | §6.1–6.4 CI foundation (tests.yml + lint.yml) | ✅ Complete |
-| §7 Codebase cleanup (redundant files + old notebooks) | ✅ Complete |
-| §9 Notebook variable naming consistency | ✅ Complete |
+| §6.5 Additional CI/CD | ✅ Complete — pip-audit, dependency-review, pre-commit, docs build CI, equivalence gate in CI, `twine check`, concurrency groups |
+| §7 Codebase cleanup | ✅ Complete (+ removed stale root `sample.py` and empty `diffusion.py`) |
 | §8 Publication-quality plots | ✅ Complete |
-| §3.2 `n_jobs` on remaining functions + scaling plots | ✅ Complete |
-| §3.4–3.5 Multi-GPU + MPI evaluation | To do (cluster dependent) |
-| §3.7 SLURM array eval jobs | To do |
-| §4 Documentation + ReadTheDocs | ✅ Complete — all guide pages, API prose, module docstrings, RTD connected, docs CI (`docs.yml`), RTD theme |
+| §9 Notebook variable naming consistency | ✅ Complete |
+| §4 Documentation + ReadTheDocs | ✅ Complete — guides (incl. background, contributing), API prose, module docstrings, notebook summaries 01–14, RTD theme, docs CI with `-W`/`fail_on_warning` |
 | §5 PyPI distribution | ✅ Complete (publish.yml + Trusted Publisher; `v0.1.0` live on PyPI, `v0.1.1` tagged) |
-| §6.5 Additional CI/CD | ✅ Complete (pip-audit, dependency-review, pre-commit, docs build CI; b/d/e/f/g skipped as overkill) |
+| ⚠ Normalisation scheme (inconsistency #7) | **BLOCKER** — notebooks 03/06 disagree; resolve on the cluster before trusting statistics (see Cluster action plan) |
+| §3.4–3.5 Multi-GPU + MPI evaluation | To do (cluster dependent) |
+| §3.7 SLURM array eval jobs | To do (needs `eval.py`; optional — notebooks 06–09 are the critical path) |
 
 ---
 
@@ -2367,15 +2375,18 @@ Fix in both notebooks before any other changes in this phase.
 5. ✅ **CI foundation** — `tests.yml` + `lint.yml` (Node 24 actions).
 6. ✅ **Numba JIT** — §2.6a; skipped (accumulation < 3% of runtime).
 7. ✅ **GPU port** — `map2cl_torch` with equivalence test (§3.3).
-8. **Codebase cleanup** — §7; review then delete `redundant/` scripts and old `docs/` notebooks; migrate `05_plots.ipynb` to tutorial 14. ← Next
-9. **Notebook naming consistency** — §9; fix `dx=1.41` bug in 06+07; rename per §9.1 glossary; eliminate `N`/`cib_train`/`ell` anti-patterns.
-10. **Publication-quality plots** — §8; create `plot_style.py`; rewrite all paper figures in tutorial 14 to use Wong palette, correct cmaps, PDF+PNG output.
-11. **`n_jobs` on remaining functions + strong/weak scaling plots** — §3.2 full; Figures 11–12.
-12. **MPI wrapper + eval SLURM array job** — §3.5/3.7; Figure 13.
-13. **Multi-node training SLURM script** — DDP config (§3.6); validate on 2 nodes.
-14. **Docstring audit** — §4.1; prerequisite for Sphinx.
-15. **Sphinx + RTD skeleton** — §4.2–4.5; get a basic build passing.
-16. **`pyproject.toml` audit + TestPyPI** — §5.2–5.4; dry-run the publish workflow.
-17. **PyPI publish** — §5.5–5.6; tag `v0.1.0`; set up Trusted Publisher; release.
-18. **Cython** — §2.6g; only if Numba JIT is insufficient.
-19. **Additional CI items** — §6.5; dependency pinning, notebook smoke tests, `towncrier`.
+8. ✅ **Codebase cleanup** — §7; removed `redundant/` scripts, old `docs/` notebooks, stale root `sample.py`, empty `diffusion.py`; migrated `05_plots.ipynb` → tutorial 14.
+9. ✅ **Notebook naming consistency** — §9; `dx=1.41`→1.40625, glossary renames, anti-patterns removed.
+10. ✅ **Publication-quality plots** — §8; `plot_style.py` + Wong palette in tutorial 14.
+11. ✅ **`n_jobs` on remaining functions + `torch.compile` sampling** — §3.2 full; §2.6f.
+12. ✅ **Docstring audit + Sphinx/RTD + PyPI** — §4/§5; RTD live, `v0.1.0`/`v0.1.1` published.
+13. ✅ **Test hardening + opt-in `--rescale`** — distinct-channel/non-Gaussian tests; inconsistency #4 flag.
+14. ✅ **CI/CD hardening** — §6.5; equivalence gate in CI, docs `-W`, `twine check`, concurrency.
+
+**Remaining (cluster-dependent, see Cluster action plan):**
+
+15. ⚠ **Resolve normalisation #7** — confirm on-disk files + checkpoint training scheme *before* running statistics. ← Next (on cluster login)
+16. **Sample → statistics → paper figures** — notebooks 06–09 are the critical path; 10–14 if time permits.
+17. **MPI wrapper + eval SLURM array job** — §3.5/3.7; needs `eval.py`; optional (convergence plots).
+18. **Multi-node training SLURM script** — §3.6; **deferred post-thesis** (single GPU suffices).
+19. **Cython (§2.6g), remaining §3.9 parallel figures (12–15)** — post-thesis / cluster.

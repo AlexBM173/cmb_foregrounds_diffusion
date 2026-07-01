@@ -78,49 +78,53 @@ pip install -e ".[dev]"
 
 ## Data
 
-### AGORA Simulation Maps
+### Globus Collections
 
-Raw AGORA simulation maps are hosted on the Globus data transfer service. You will need:
+The raw simulation files are distributed across two Globus collections. You will need a Globus account and the Globus Connect Personal client to transfer them.
 
-- A Globus account (free registration at https://www.globus.org/)
-- The Globus Connect Personal client installed on your machine
-- A Globus endpoint configured for your local system
+**Collection: Agora** — full-sky HEALPix simulation maps (NSIDE=8192):
 
-**Collection Details:**
+| File | Globus path | Units |
+|---|---|---|
+| `agora_len_mag_cibmap_act_150ghz.fits` | `/components/cib/len/act/nocc/` | Jy/sr |
+| `agora_len_mag_cibmap_act_150ghz.fits` | `/components/cib/len/act/uK/` | µK |
+| `agora_ltszNG_bahamas80_bnd_unb_1.0e+12_1.0e+18_lensed.fits` | `/components/tsz/len/` | Compton-y |
 
-- **Collection name:** AGORA Simulation Products
-- **Path within collection:** `/AGORA/v0.7/bahamas80_scal1.000/mask_radio_cib_2.0mjy/`
+The preprocessing pipeline uses the Jy/sr CIB map and the Compton-y tSZ map. The µK CIB variant is provided for reference.
 
-The collection contains full-sky HEALPix maps for:
-- CIB (NSIDE=8192) in Jy/sr
-- tSZ (NSIDE=8192) in Compton-y units
+**Collection: agora** — halo catalogue slices:
 
-Consult the Globus documentation (https://docs.globus.org/how-to/get-started/) for transferring files to your local system.
+| Files | Globus path |
+|---|---|
+| `haloslc_rot_*.npz` | `halolc/` |
+
+The catalogue slices are concatenated and filtered by `docs/tutorials/01_halo_catalogue.ipynb` to produce `data/halo_catalogue/halo_catalogue_m500gt3e14.npz`, which is used by the cluster masking step.
 
 ### Preprocessing
 
-The full data preprocessing pipeline is documented in `preprocessing.ipynb`. This notebook:
-1. Loads raw FITS maps from Globus
-2. Applies point-source masking (2 mJy threshold)
-3. Applies apodised cluster masks for halos with M_500c ≥ 3×10¹⁴ M☉
-4. Low-pass filters at ℓ = 7000 to avoid aliasing
-5. Extracts 6°×6° flat-sky patches at 256×256 resolution
-6. Min-max normalises CIB to [0, 1] and z-score normalises tSZ
-7. Saves training-ready `.npy` files
+The full preprocessing pipeline runs across the first three tutorial notebooks:
 
-**Expected Local Data Layout:**
+1. **`01_halo_catalogue.ipynb`** — concatenates halo catalogue slices, filters to M_500c ≥ 3×10¹⁴ M☉, saves `data/halo_catalogue/halo_catalogue_m500gt3e14.npz`
+2. **`02_masking.ipynb`** — loads raw FITS maps, applies 2 mJy point-source masking and apodised cluster masks, saves `data/cib_150_masked.fits` and `data/tsz_150_masked.fits`
+3. **`03_patch_extraction.ipynb`** — extracts 6°×6° flat-sky patches at 256×256 resolution, low-pass filters at ℓ = 7000, normalises (CIB: z-score; tSZ: z-score), saves training-ready `.npy` arrays
+
+**Expected local data layout after preprocessing:**
 
 ```
 data/
+├── agora_len_mag_cibmap_act_150ghz.fits         # raw CIB map (from Globus)
+├── agora_ltszNG_bahamas80_...lensed.fits         # raw tSZ map (from Globus)
+├── cib_150_masked.fits                           # after 02_masking
+├── tsz_150_masked.fits                           # after 02_masking
+├── halo_catalogue/
+│   └── halo_catalogue_m500gt3e14.npz             # after 01_halo_catalogue
 └── low_pass/
     └── 2mJy/
-        ├── cib_zero_norm_6x6_w_au_lp.npy       # CIB, normalised to [0, 1]
-        ├── tsz_norm_6x6_w_au_lp.npy             # tSZ, z-score normalised
-        ├── norm_params_2mJy.npy                 # Normalisation statistics
-        └── new_samples_cib_tsz_*.npy            # DDPM-generated samples (output)
+        ├── CIB_map_150GHz_256_st6_zscore_2mJy_lp.npy   # training-ready CIB
+        ├── tSZ3_map_150GHz_256_st6_zscore_2mJy_lp.npy  # training-ready tSZ
+        ├── gaussian_cib_tsz_2mJy_lp.npy                # Gaussian baseline
+        └── norm_params_2mJy.npy                         # normalisation stats
 ```
-
-If you do not have access to the raw FITS files or prefer to use preprocessed training arrays directly, the `.npy` files can be transferred separately via Globus.
 
 ## Quick Start
 

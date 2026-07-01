@@ -109,12 +109,15 @@ The pipeline is:
 
 ### Remote data
 
-Raw AGORA maps are hosted on the **Globus** data transfer service:
+Raw files are on two Globus collections:
 
-- **Collection:** AGORA Simulation Products
-- **Path:** `/AGORA/v0.7/bahamas80_scal1.000/mask_radio_cib_2.0mjy/`
+| Collection | Path | Files |
+|---|---|---|
+| **Agora** | `/components/cib/len/act/nocc/` | `agora_len_mag_cibmap_act_150ghz.fits` (Jy/sr) |
+| **Agora** | `/components/tsz/len/` | `agora_ltszNG_bahamas80_bnd_unb_1.0e+12_1.0e+18_lensed.fits` (Compton-y) |
+| **agora** | `halolc/` | `haloslc_rot_*.npz` (halo catalogue slices) |
 
-The `preprocessing.ipynb` notebook documents the full preprocessing pipeline from raw HEALPix maps to the training `.npy` arrays.
+See `docs/tutorials/01_halo_catalogue.ipynb` through `03_patch_extraction.ipynb` for the full preprocessing pipeline.
 
 ## Reference docs
 

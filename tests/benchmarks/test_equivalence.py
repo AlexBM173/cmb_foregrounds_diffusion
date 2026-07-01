@@ -1,18 +1,21 @@
 """Equivalence tests for optimised implementations.
 
 Each test confirms that an optimised code path (fast binning, vectorised
-thresholds, n_jobs>1) produces results numerically identical to the
-serial reference implementation.
+thresholds, n_jobs>1, GPU map2cl_torch) produces results numerically
+identical (or within float32 tolerance) to the serial CPU reference.
 """
 
 import numpy as np
 import pytest
+import torch
 
 from foregrounds_diffusion.flatmaps import (
     _build_ell_bin_cache,
+    build_lbin_idx_fft2,
     get_lpf_hpf,
     make_gaussian_realisation,
     map2cl,
+    map2cl_torch,
 )
 from foregrounds_diffusion.moments import compute_cross_moments
 from foregrounds_diffusion.morphology import compute_minkowski_tensors
@@ -118,3 +121,49 @@ def test_compute_minkowski_tensors_n_jobs_2_matches_serial(patch_stack):
 
     np.testing.assert_allclose(ref["W012"]["beta"], par["W012"]["beta"], rtol=1e-12)
     np.testing.assert_allclose(ref["W012"]["theta"], par["W012"]["theta"], rtol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# §3.3 — map2cl_torch GPU port
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("H", [64, 128])
+def test_map2cl_torch_matches_cpu(H):
+    """map2cl_torch output matches CPU map2cl within float32 tolerance."""
+    params = [H, H, 1.40625, 1.40625]
+    np.random.seed(42)
+    maps_np = np.array([make_gaussian_realisation(params, _EL, _CL) for _ in range(8)])
+
+    # CPU reference (per-map loop)
+    cl_ref = np.stack([map2cl(params, m)[1] for m in maps_np])
+
+    # Torch (CPU device — no GPU required to test correctness)
+    lbin_idx, bin_counts, n_bins = build_lbin_idx_fft2(params)
+    maps_t = torch.from_numpy(maps_np.astype(np.float32))
+    cl_torch = map2cl_torch(maps_t, lbin_idx, bin_counts, n_bins, dx_arcmin=1.40625)
+
+    np.testing.assert_allclose(
+        cl_ref,
+        cl_torch.numpy(),
+        rtol=1e-3,  # float32 vs float64 accumulation
+        atol=1e-30,
+    )
+
+
+def test_map2cl_torch_shape():
+    """Output shape is (N, n_bins)."""
+    params = _PARAMS64
+    lbin_idx, bin_counts, n_bins = build_lbin_idx_fft2(params)
+    maps_t = torch.randn(5, 64, 64)
+    out = map2cl_torch(maps_t, lbin_idx, bin_counts, n_bins, dx_arcmin=1.40625)
+    assert out.shape == (5, n_bins)
+
+
+def test_map2cl_torch_non_negative():
+    """Auto-spectrum is non-negative."""
+    params = _PARAMS64
+    lbin_idx, bin_counts, n_bins = build_lbin_idx_fft2(params)
+    maps_t = torch.randn(4, 64, 64)
+    out = map2cl_torch(maps_t, lbin_idx, bin_counts, n_bins, dx_arcmin=1.40625)
+    assert (out >= 0).all()

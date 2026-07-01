@@ -421,3 +421,107 @@ def radial_profile(z, xy=None, bin_size=1.0, minbin=0.0, maxbin=10.0, to_arcmins
     errval = std_mean / hit_count**0.5
     radprf[:, 2] = errval
     return radprf
+
+
+# ---------------------------------------------------------------------------
+# GPU-accelerated batched power spectrum (§3.3)
+# ---------------------------------------------------------------------------
+
+
+def build_lbin_idx_fft2(mapparams, binsize=None, minbin=100, maxbin=10000):
+    """Pre-compute ℓ-bin index tensor for :func:`map2cl_torch`.
+
+    Uses the same full fft2 frequency grid as :func:`_build_ell_bin_cache`
+    so that :func:`map2cl_torch` produces per-bin means that are numerically
+    identical (within float32 tolerance) to the CPU :func:`map2cl`.
+
+    Parameters
+    ----------
+    mapparams : list
+        [nx, ny, dx, dy] — see :func:`get_lxly`.
+    binsize : float, optional
+        Bin width in ℓ.  Defaults to the smallest ℓ spacing.
+    minbin, maxbin : float
+        Multipole range.
+
+    Returns
+    -------
+    lbin_idx : torch.Tensor, shape (ny * nx,), dtype long
+        0-indexed bin assignment per fft2 pixel.  Out-of-range pixels
+        receive the sentinel value ``n_bins``.
+    bin_counts : torch.Tensor, shape (n_bins,), dtype float32
+        Number of non-zero fft2 pixels per bin (for normalisation).
+    n_bins : int
+        Number of ℓ bins.
+    """
+    import torch
+
+    # Reuse the CPU cache computation — same bin edges and ell grid.
+    binarr, bin_idx_np, valid_np, binsize = _build_ell_bin_cache(
+        mapparams, binsize=binsize, minbin=minbin, maxbin=maxbin
+    )
+    n_bins = len(binarr)
+
+    lbin_flat = bin_idx_np.copy()
+    lbin_flat[~valid_np] = n_bins  # sentinel for out-of-range pixels
+
+    bin_counts = np.bincount(lbin_flat[valid_np], minlength=n_bins).astype(np.float32)
+    bin_counts = np.where(bin_counts > 0, bin_counts, 1.0)  # avoid division by zero
+
+    return (
+        torch.from_numpy(lbin_flat).long(),
+        torch.from_numpy(bin_counts),
+        n_bins,
+    )
+
+
+def map2cl_torch(maps_nhw, lbin_idx, bin_counts, n_bins, dx_arcmin):
+    """Batched auto-power spectrum on GPU via ``torch.fft.fft2``.
+
+    Computes all N power spectra in a single batched FFT call, replacing the
+    Python loop over N maps in :func:`map2cl`.  Uses the full fft2 grid (same
+    as the CPU implementation) so per-bin means match to within float32
+    accumulation differences (``rtol ≈ 1e-3``).
+
+    Parameters
+    ----------
+    maps_nhw : torch.Tensor, shape (N, H, W)
+        Batch of flat-sky maps on any device (CPU or CUDA).
+    lbin_idx : torch.Tensor, shape (H * W,), dtype long
+        Bin assignments from :func:`build_lbin_idx_fft2`, on the same device.
+    bin_counts : torch.Tensor, shape (n_bins,), dtype float32
+        Pixel counts per bin from :func:`build_lbin_idx_fft2`, on the same device.
+    n_bins : int
+        Number of ℓ bins.
+    dx_arcmin : float
+        Pixel resolution in arcminutes (same for x and y).
+
+    Returns
+    -------
+    torch.Tensor, shape (N, n_bins), dtype float32
+        Mean power per ℓ bin for each of the N input maps.
+
+    Examples
+    --------
+    >>> lbin_idx, bin_counts, n_bins = build_lbin_idx_fft2(mapparams)
+    >>> maps_t = torch.from_numpy(maps_np)          # (N, H, W)
+    >>> cl_batch = map2cl_torch(maps_t, lbin_idx, bin_counts, n_bins, 1.40625)
+    """
+    import math
+
+    import torch
+
+    N, H, W = maps_nhw.shape
+    dx_rad = math.radians(dx_arcmin / 60.0)
+    norm = dx_rad**2 / (H * W)
+
+    fft = torch.fft.fft2(maps_nhw.float())  # (N, H, W) complex64
+    power = (fft.real**2 + fft.imag**2) * norm  # (N, H, W)
+    flat = power.reshape(N, -1)  # (N, H*W)
+
+    # Allocate n_bins+1 columns so the sentinel index n_bins has a valid
+    # write target; the extra column is discarded before returning.
+    cl = torch.zeros(N, n_bins + 1, dtype=torch.float32, device=maps_nhw.device)
+    cl.scatter_add_(1, lbin_idx.unsqueeze(0).expand(N, -1), flat)
+
+    return cl[:, :n_bins] / bin_counts

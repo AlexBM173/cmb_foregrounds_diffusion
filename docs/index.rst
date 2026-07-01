@@ -15,6 +15,7 @@ and developed as MPhil Project 7 (Data Intensive Science, Cambridge).
    guides/installation
    guides/quickstart
    guides/data_conventions
+   guides/contributing
 
 .. toctree::
    :maxdepth: 1

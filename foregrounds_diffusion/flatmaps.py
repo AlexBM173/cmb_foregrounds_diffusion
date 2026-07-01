@@ -87,10 +87,25 @@ def get_lxly_az_angle(lx, ly):
 
 
 def get_lpf_hpf(flatskymapparams, lmin_lmax, filter_type=0):
-    """
-    filter_type = 0 - low pass filter
-    filter_type = 1 - high pass filter
-    filter_type = 2 - band pass
+    """Build a 2D Fourier-space filter on the flat-sky grid.
+
+    Parameters
+    ----------
+    flatskymapparams : list
+        ``[nx, ny, dx, dy]`` — map dimensions and pixel size in arcmin.
+    lmin_lmax : float or tuple of float
+        For ``filter_type`` 0 or 1: a single ℓ cutoff.
+        For ``filter_type`` 2: a ``(lmin, lmax)`` pair defining the passband.
+    filter_type : int, optional
+        0 — low-pass (default): zero all ℓ > ``lmin_lmax``.
+        1 — high-pass: zero all ℓ < ``lmin_lmax``.
+        2 — band-pass: pass only ``lmin ≤ ℓ ≤ lmax``.
+
+    Returns
+    -------
+    fft_filter : ndarray, shape (ny, nx)
+        Binary 2D mask (0 or 1) in Fourier space.  Multiply by
+        ``np.fft.fft2(map)`` then ``np.fft.ifft2`` to apply.
     """
 
     lx, ly = get_lxly(flatskymapparams)

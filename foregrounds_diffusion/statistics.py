@@ -11,8 +11,7 @@ the central peak of a two-point correlation function.
 :func:`gaussian` — parameterised 2D Gaussian (height, centre, widths, angle).
 :func:`moments` — estimate Gaussian parameters from image moments.
 :func:`fitgaussian` — fit a 2D Gaussian to a 2D array via ``scipy.optimize``.
-:func:`fitting_func` — convenience wrapper that fits and optionally returns
-    the residual map; also enforces parameter bounds.
+:func:`fitting_func` — convenience wrapper that fits and optionally returns the residual map; also enforces parameter bounds.
 
 Summary statistics
 ------------------

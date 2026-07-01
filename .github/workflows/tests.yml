@@ -20,6 +20,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      - name: Upgrade pip
+        run: pip install --upgrade pip
+
       # Install CPU-only torch first so the later `pip install -e .` doesn't
       # pull in the large CUDA variant as a transitive dependency.
       - name: Install torch (CPU)
@@ -41,3 +44,6 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           fail_ci_if_error: false
+
+      - name: Security audit
+        run: pip install pip-audit && pip-audit --skip-editable

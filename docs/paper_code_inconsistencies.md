@@ -49,7 +49,7 @@ Comparison between "Learning Correlated Astrophysical Foregrounds with Denoising
 
 ## 6. β₁₀₀₀ inconsistency within the paper itself
 
-**Paper §3.1:** β₁₀₀₀ = **0.02**  
+**Paper §3.1:** β₁₀₀₀ = **0.02**
 **Paper Appendix A:** β₁₀₀₀ = **10⁻² = 0.01**
 
 These differ by a factor of 2. The code constructs `GaussianDiffusion` without specifying `beta_schedule` kwargs, so it uses the library defaults in `denoising-diffusion-pytorch` v2.2.5 (sigmoid schedule with its own hardcoded endpoints). Whether the library's default endpoints match either paper value is not verified.

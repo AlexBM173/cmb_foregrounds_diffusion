@@ -5,10 +5,10 @@ This repository implements a denoising diffusion probabilistic model (DDPM) pipe
 ## Overview
 
 - **Data**: AGORA maps with point sources masked at 2mJy threshold. Zeroed-out pixels represent masked regions.
-- **Preprocessing**: 
+- **Preprocessing**:
   - High-frequency suppression via sharp mode cutoff (`l > 7000`) to avoid aliasing.
   - Negative pixel values from filtering artifacts are zeroed out.
-- **Patching**: 
+- **Patching**:
   - Patches of size 6°×6° projected to 256×256 pixel Cartesian grids.
   - Centered on a grid defined by step size of 6° adjusted for equal angular separation in galactic coordinates.
 
@@ -33,4 +33,4 @@ accelerate launch sample.py
 
 ## Requirements
 * Python 3+
-** Denoising-diffusion (https://github.com/lucidrains/denoising-diffusion-pytorch) 
+** Denoising-diffusion (https://github.com/lucidrains/denoising-diffusion-pytorch)

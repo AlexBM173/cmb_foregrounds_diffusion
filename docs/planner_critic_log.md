@@ -515,6 +515,3 @@ Remaining issues for manual follow-up:
 - [MODERATE] §0.6 NPZ: missing agora_*, MF, scattering, full gaussian_* arrays needed for promised figures
 - [MODERATE] §0.6 / data staging: AGORA truth maps not confirmed staged onto CSD3; live blocker
 - [MODERATE] §2.6f: torch.compile target should be diffusion.model not diffusion wrapper
-
-
-

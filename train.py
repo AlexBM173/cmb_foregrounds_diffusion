@@ -10,13 +10,14 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.utils.data as data
-from tqdm import tqdm
-from denoising_diffusion_pytorch import Unet, GaussianDiffusion, Trainer1D, Dataset1D
+from denoising_diffusion_pytorch import Dataset1D, GaussianDiffusion, Trainer1D, Unet
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch_1d import num_to_groups
+from tqdm import tqdm
 
 # ---------------------------------------------------------------------------
 # Trainer with WandB loss logging
 # ---------------------------------------------------------------------------
+
 
 class WandbTrainer1D(Trainer1D):
     """Trainer1D with optional per-step wandb loss and sample image logging."""
@@ -30,12 +31,12 @@ class WandbTrainer1D(Trainer1D):
         device = accelerator.device
         log = self.use_wandb and accelerator.is_main_process
 
-        with tqdm(initial=self.step, total=self.train_num_steps,
-                  disable=not accelerator.is_main_process) as pbar:
-
+        with tqdm(
+            initial=self.step, total=self.train_num_steps, disable=not accelerator.is_main_process
+        ) as pbar:
             while self.step < self.train_num_steps:
                 self.model.train()
-                total_loss = 0.
+                total_loss = 0.0
 
                 for _ in range(self.gradient_accumulate_every):
                     data = next(self.dl).to(device)
@@ -45,10 +46,11 @@ class WandbTrainer1D(Trainer1D):
                         total_loss += loss.item()
                     self.accelerator.backward(loss)
 
-                pbar.set_description(f'loss: {total_loss:.4f}')
+                pbar.set_description(f"loss: {total_loss:.4f}")
 
                 if log:
                     import wandb
+
                     wandb.log({"train/loss": total_loss}, step=self.step)
 
                 accelerator.wait_for_everyone()
@@ -71,23 +73,31 @@ class WandbTrainer1D(Trainer1D):
                                 [self.ema.ema_model.sample(batch_size=n) for n in batches], dim=0
                             )
 
-                        sample_path = self.results_folder / f'sample-{milestone}.pt'
+                        sample_path = self.results_folder / f"sample-{milestone}.pt"
                         torch.save(all_samples, str(sample_path))
                         self.save(milestone)
 
                         if log:
                             import wandb
+
                             samples_np = all_samples.cpu().numpy()
                             n_show = min(8, len(samples_np))
-                            wandb.log({
-                                "samples/cib": [wandb.Image(samples_np[i, 0]) for i in range(n_show)],
-                                "samples/tsz": [wandb.Image(samples_np[i, 1]) for i in range(n_show)],
-                                "checkpoint":  milestone,
-                            }, step=self.step)
+                            wandb.log(
+                                {
+                                    "samples/cib": [
+                                        wandb.Image(samples_np[i, 0]) for i in range(n_show)
+                                    ],
+                                    "samples/tsz": [
+                                        wandb.Image(samples_np[i, 1]) for i in range(n_show)
+                                    ],
+                                    "checkpoint": milestone,
+                                },
+                                step=self.step,
+                            )
 
                 pbar.update(1)
 
-        accelerator.print('training complete')
+        accelerator.print("training complete")
 
 
 # ---------------------------------------------------------------------------
@@ -100,15 +110,21 @@ parser.add_argument(
     default=None,
     metavar="NAME",
     help="Name for this training run (also read from $RUN_NAME env var). "
-         "Checkpoints and logs are saved to results/<NAME>/.",
+    "Checkpoints and logs are saved to results/<NAME>/.",
 )
-parser.add_argument("--ptsrc",      type=int,   default=2,      help="Point-source threshold in mJy (default: 2)")
-parser.add_argument("--res",        type=int,   default=256,    help="Map resolution in pixels (default: 256)")
-parser.add_argument("--steps",      type=int,   default=100000, help="Training steps (default: 100000)")
-parser.add_argument("--batch-size", type=int,   default=16,     help="Batch size per GPU (default: 16)")
-parser.add_argument("--lr",         type=float, default=1e-4,   help="Learning rate (default: 1e-4)")
-parser.add_argument("--wandb",      action="store_true", default=False,
-                    help="Enable Weights & Biases logging (also set via WANDB=1 env var)")
+parser.add_argument(
+    "--ptsrc", type=int, default=2, help="Point-source threshold in mJy (default: 2)"
+)
+parser.add_argument("--res", type=int, default=256, help="Map resolution in pixels (default: 256)")
+parser.add_argument("--steps", type=int, default=100000, help="Training steps (default: 100000)")
+parser.add_argument("--batch-size", type=int, default=16, help="Batch size per GPU (default: 16)")
+parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate (default: 1e-4)")
+parser.add_argument(
+    "--wandb",
+    action="store_true",
+    default=False,
+    help="Enable Weights & Biases logging (also set via WANDB=1 env var)",
+)
 args = parser.parse_args()
 
 # Run name: CLI flag takes priority, then $RUN_NAME env var
@@ -117,12 +133,12 @@ if not run_name:
     parser.error(
         "--run-name is required (or set the RUN_NAME environment variable).\n"
         "  CLI:   accelerate launch train.py --run-name my_run_v1\n"
-        "  SLURM: set RUN_NAME=\"my_run_v1\" in train_slurm.sh"
+        '  SLURM: set RUN_NAME="my_run_v1" in train_slurm.sh'
     )
 
 use_wandb = args.wandb or os.environ.get("WANDB", "").strip() in ("1", "true", "yes")
 
-RES   = args.res
+RES = args.res
 PTSRC = args.ptsrc
 
 RESULTS_DIR = Path("results") / run_name
@@ -138,11 +154,12 @@ tsz_maps = np.load(DATA_DIR / f"tSZ3_map_150GHz_{RES}_st6_zscore_{PTSRC}mJy_lp.n
 cut_maps = np.concatenate([cib_maps, tsz_maps], axis=-1).transpose(0, 3, 1, 2)
 print(f"Loaded {len(cut_maps)} patches, shape {cut_maps.shape}")
 
-rng           = np.random.default_rng(seed=42)
-indices       = rng.permutation(len(cut_maps))
-train_indices = indices[:int(0.8 * len(cut_maps))]
+rng = np.random.default_rng(seed=42)
+indices = rng.permutation(len(cut_maps))
+train_indices = indices[: int(0.8 * len(cut_maps))]
 training_images = torch.tensor(cut_maps[train_indices], dtype=torch.float32)
 print(f"Training set: {len(training_images)} patches")
+
 
 def augment_images_unique(images):
     r1 = torch.rot90(images, k=1, dims=(2, 3))
@@ -151,6 +168,7 @@ def augment_images_unique(images):
     flips = [torch.flip(x, dims=[3]) for x in [images, r1, r2, r3]]
     return torch.cat([images, r1, r2, r3] + flips, dim=0)
 
+
 augmented_images = augment_images_unique(training_images)
 print(f"After augmentation: {len(augmented_images)} patches")
 
@@ -158,9 +176,9 @@ print(f"After augmentation: {len(augmented_images)} patches")
 # Model
 # ---------------------------------------------------------------------------
 
-model     = Unet(dim=64, dim_mults=(1, 2, 4, 8), channels=2, flash_attn=True)
+model = Unet(dim=64, dim_mults=(1, 2, 4, 8), channels=2, flash_attn=True)
 diffusion = GaussianDiffusion(model, image_size=256, timesteps=1000, auto_normalize=False)
-dataset   = Dataset1D(augmented_images)
+dataset = Dataset1D(augmented_images)
 
 trainer = WandbTrainer1D(
     diffusion,
@@ -171,7 +189,7 @@ trainer = WandbTrainer1D(
     save_and_sample_every=5000,
     gradient_accumulate_every=2,
     ema_decay=0.995,
-    mixed_precision_type='bf16',
+    mixed_precision_type="bf16",
     results_folder=str(RESULTS_DIR),
     use_wandb=use_wandb,
 )
@@ -194,19 +212,19 @@ trainer.dl = cycle(
 # ---------------------------------------------------------------------------
 
 run_config = {
-    "run_name":       run_name,
-    "started":        datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    "slurm_job_id":   os.environ.get("SLURM_JOB_ID"),
-    "results_dir":    str(RESULTS_DIR),
-    "data_dir":       str(DATA_DIR),
-    "ptsrc_mJy":      PTSRC,
-    "resolution":     RES,
-    "n_train":        len(training_images),
-    "n_augmented":    len(augmented_images),
-    "train_steps":    args.steps,
-    "batch_size":     args.batch_size,
-    "lr":             args.lr,
-    "wandb":          use_wandb,
+    "run_name": run_name,
+    "started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+    "results_dir": str(RESULTS_DIR),
+    "data_dir": str(DATA_DIR),
+    "ptsrc_mJy": PTSRC,
+    "resolution": RES,
+    "n_train": len(training_images),
+    "n_augmented": len(augmented_images),
+    "train_steps": args.steps,
+    "batch_size": args.batch_size,
+    "lr": args.lr,
+    "wandb": use_wandb,
 }
 with open(RESULTS_DIR / "run_config.json", "w") as f:
     json.dump(run_config, f, indent=2)
@@ -221,6 +239,7 @@ print()
 
 if use_wandb and trainer.accelerator.is_main_process:
     import wandb
+
     wandb.init(
         project="cmb_foregrounds_diffusion",
         name=run_name,
@@ -235,4 +254,5 @@ trainer.train()
 
 if use_wandb and trainer.accelerator.is_main_process:
     import wandb
+
     wandb.finish()

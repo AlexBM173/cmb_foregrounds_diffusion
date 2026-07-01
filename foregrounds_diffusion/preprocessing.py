@@ -140,6 +140,38 @@ def renormalize_dm_maps(dm_maps, train_maps, variance_scaling=True):
     return np.transpose(dm_maps, (0, 3, 1, 2))
 
 
+def rescale_samples(samples, cib_factor=1.0, tsz_factor=1.0):
+    """Apply per-channel scalar rescaling to DDPM samples (paper §3.2).
+
+    Prabhu et al. correct the DDPM's slight under-dispersion by multiplying
+    each generated channel by a single global factor: the ratio of the AGORA
+    sample standard deviation to the generated sample standard deviation.
+    This is a pure scalar multiply, distinct from the affine
+    :func:`renormalize_dm_maps` (see inconsistency #4 in
+    ``docs/paper_code_inconsistencies.md``).
+
+    Parameters
+    ----------
+    samples : ndarray, shape (N, C, H, W)
+        Raw DDPM samples, channels-first (channel 0 = CIB, channel 1 = tSZ).
+    cib_factor, tsz_factor : float
+        Multiplicative factors for the CIB (channel 0) and tSZ (channel 1)
+        channels.  ``1.0`` leaves a channel unchanged.  Prabhu et al. cite
+        1.0328 (CIB) and 1.1425 (tSZ) for their checkpoint; for a different
+        checkpoint, measure ``std(AGORA) / std(generated)`` per channel.
+
+    Returns
+    -------
+    ndarray, shape (N, C, H, W)
+        Rescaled copy.  The input is not modified.
+    """
+    out = samples.copy()
+    out[:, 0] *= cib_factor
+    if out.shape[1] > 1:
+        out[:, 1] *= tsz_factor
+    return out
+
+
 def denormalize_dm_maps(dm_maps, cib_mean, cib_std, tsz_mean, tsz_std):
     """Invert Z-score normalisation applied during patch extraction.
 

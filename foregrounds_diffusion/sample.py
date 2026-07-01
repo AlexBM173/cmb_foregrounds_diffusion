@@ -142,6 +142,27 @@ def main():
         ),
     )
     parser.add_argument(
+        "--rescale-cib",
+        type=float,
+        default=None,
+        metavar="F",
+        help=(
+            "Post-sampling scalar rescaling factor for the CIB channel "
+            "(paper §3.2: std(AGORA)/std(generated); Prabhu et al. use 1.0328). "
+            "Off by default — samples are saved raw."
+        ),
+    )
+    parser.add_argument(
+        "--rescale-tsz",
+        type=float,
+        default=None,
+        metavar="F",
+        help=(
+            "Post-sampling scalar rescaling factor for the tSZ channel "
+            "(paper §3.2; Prabhu et al. use 1.1425). Off by default."
+        ),
+    )
+    parser.add_argument(
         "--wandb",
         action="store_true",
         default=False,
@@ -168,6 +189,8 @@ def main():
                 "channels": args.channels,
                 "output": args.output,
                 "sampling_timesteps": args.sampling_timesteps or 1000,
+                "rescale_cib": args.rescale_cib or 1.0,
+                "rescale_tsz": args.rescale_tsz or 1.0,
             },
         )
 
@@ -182,6 +205,14 @@ def main():
     all_samples = sample(
         diffusion, accelerator, num_batches=args.batches, batch_size=args.batch_size
     )
+
+    if args.rescale_cib is not None or args.rescale_tsz is not None:
+        from foregrounds_diffusion.preprocessing import rescale_samples
+
+        cib_factor = args.rescale_cib if args.rescale_cib is not None else 1.0
+        tsz_factor = args.rescale_tsz if args.rescale_tsz is not None else 1.0
+        print(f"Applying post-sampling rescaling: CIB×{cib_factor}, tSZ×{tsz_factor}")
+        all_samples = rescale_samples(all_samples, cib_factor=cib_factor, tsz_factor=tsz_factor)
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

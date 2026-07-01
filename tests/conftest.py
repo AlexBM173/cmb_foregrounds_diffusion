@@ -43,3 +43,29 @@ def patch_stack_256(flatskymapparams_256):
 @pytest.fixture
 def binary_map(gaussian_patch):
     return gaussian_patch > np.median(gaussian_patch)
+
+
+@pytest.fixture
+def skewed_patch(flatskymapparams):
+    """Spatially-correlated, positively-skewed patch (lognormal-type).
+
+    Built as ``exp(g)`` from a unit-variance correlated Gaussian realisation.
+    Unlike per-pixel chi-square noise, the non-Gaussianity lives in the
+    correlated structure and survives bandpass filtering (real-space skew
+    ≈ 5), making it a realistic non-Gaussian test field for the higher-order
+    statistics, peak-count, and morphology machinery.
+    """
+    np.random.seed(7)
+    g = make_gaussian_realisation(flatskymapparams, _EL, _CL)
+    return np.exp(g / g.std())
+
+
+@pytest.fixture
+def skewed_patch_stack(flatskymapparams):
+    """Stack of 16 positively-skewed lognormal-type patches (see skewed_patch)."""
+    stack = []
+    for s in range(16):
+        np.random.seed(100 + s)
+        g = make_gaussian_realisation(flatskymapparams, _EL, _CL)
+        stack.append(np.exp(g / g.std()))
+    return np.array(stack)

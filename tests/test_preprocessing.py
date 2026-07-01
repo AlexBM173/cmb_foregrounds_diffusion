@@ -10,6 +10,7 @@ from foregrounds_diffusion.preprocessing import (
     get_lpf_hpf,
     load_all_moments,
     renormalize_dm_maps,
+    rescale_samples,
     split_data_to_tensors,
     wiener_filter,
 )
@@ -261,6 +262,38 @@ def test_denormalize_dm_maps_does_not_mutate_input():
     dm_orig = dm.copy()
     denormalize_dm_maps(dm, 0.0, 1.0, 0.0, 1.0)
     np.testing.assert_array_equal(dm, dm_orig)
+
+
+# ---------------------------------------------------------------------------
+# rescale_samples (post-sampling scalar rescaling, paper §3.2)
+# ---------------------------------------------------------------------------
+
+
+def test_rescale_samples_per_channel():
+    s = np.ones((3, 2, 4, 4))
+    out = rescale_samples(s, cib_factor=2.0, tsz_factor=3.0)
+    assert np.allclose(out[:, 0], 2.0)  # CIB channel
+    assert np.allclose(out[:, 1], 3.0)  # tSZ channel
+
+
+def test_rescale_samples_default_is_identity():
+    rng = np.random.default_rng(0)
+    s = rng.standard_normal((3, 2, 8, 8))
+    np.testing.assert_array_equal(rescale_samples(s), s)
+
+
+def test_rescale_samples_does_not_mutate_input():
+    s = np.ones((2, 2, 4, 4))
+    s_orig = s.copy()
+    rescale_samples(s, 2.0, 2.0)
+    np.testing.assert_array_equal(s, s_orig)
+
+
+def test_rescale_samples_single_channel():
+    # Must not index channel 1 when only one channel is present.
+    s = np.ones((2, 1, 4, 4))
+    out = rescale_samples(s, cib_factor=5.0, tsz_factor=9.0)
+    assert np.allclose(out[:, 0], 5.0)
 
 
 # ---------------------------------------------------------------------------

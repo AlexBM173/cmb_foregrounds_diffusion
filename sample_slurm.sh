@@ -22,6 +22,8 @@ OUTPUT="data/low_pass/2mJy/samples.npy"   # output .npy file
 BATCHES=10                                 # number of sampling batches
 BATCH_SIZE=16                              # samples per batch (per GPU)
 SAMPLING_TIMESTEPS=""                      # leave empty for full DDPM (1000 steps); set e.g. 250 for DDIM
+RESCALE_CIB=""                             # optional post-sampling scalar (paper §3.2); Prabhu et al. use 1.0328
+RESCALE_TSZ=""                             # optional post-sampling scalar (paper §3.2); Prabhu et al. use 1.1425
 USE_WANDB=false                            # set to true to enable WandB logging
 
 # ---------------------------------------------------------------------------
@@ -54,6 +56,14 @@ if [ -n "${SAMPLING_TIMESTEPS}" ]; then
     DDIM_FLAG="--sampling-timesteps ${SAMPLING_TIMESTEPS}"
 fi
 
+RESCALE_FLAG=""
+if [ -n "${RESCALE_CIB}" ]; then
+    RESCALE_FLAG="${RESCALE_FLAG} --rescale-cib ${RESCALE_CIB}"
+fi
+if [ -n "${RESCALE_TSZ}" ]; then
+    RESCALE_FLAG="${RESCALE_FLAG} --rescale-tsz ${RESCALE_TSZ}"
+fi
+
 accelerate launch --multi_gpu --num_processes 4 \
     ~/cmb_foregrounds_diffusion/foregrounds_diffusion/sample.py \
     --checkpoint "${CHECKPOINT}" \
@@ -61,4 +71,5 @@ accelerate launch --multi_gpu --num_processes 4 \
     --batch-size "${BATCH_SIZE}" \
     --output "${OUTPUT}" \
     ${DDIM_FLAG} \
+    ${RESCALE_FLAG} \
     ${WANDB_FLAG}

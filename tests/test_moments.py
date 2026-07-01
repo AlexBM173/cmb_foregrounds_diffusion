@@ -190,3 +190,28 @@ def test_cross_moments_analytic_values(flatskymapparams, bp_filters):
         np.testing.assert_allclose(m["S3abb"][j], np.mean(af * bf**2), rtol=1e-6)
         np.testing.assert_allclose(m["S4aabb"][j], np.mean(af**2 * bf**2), rtol=1e-6)
         np.testing.assert_allclose(m["S4abbb"][j], np.mean(af * bf**3), rtol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Non-Gaussian regime: the summed-moment S3/S4 columns are near zero for a
+# Gaussian field (tested above) but must respond to genuine non-Gaussianity.
+# Uses the correlated lognormal fixture, whose skewness survives bandpass
+# filtering (unlike per-pixel chi-square noise, which the CLT Gaussianises).
+# ---------------------------------------------------------------------------
+
+
+def test_skewed_patch_stack_is_nongaussian(skewed_patch_stack):
+    from scipy.stats import kurtosis, skew
+
+    flat = skewed_patch_stack.ravel()
+    assert skew(flat) > 1.0  # empirically ≈ 5; Gaussian ≈ 0
+    assert kurtosis(flat) > 1.0
+
+
+def test_summed_moments_nongaussian_exceeds_gaussian(patch_stack, skewed_patch_stack, bp_filters):
+    gauss = compute_summed_moments(patch_stack, patch_stack, bp_filters)
+    skewed = compute_summed_moments(skewed_patch_stack, skewed_patch_stack, bp_filters)
+    # Skewness (S3) and excess kurtosis (S4) magnitudes are substantially
+    # larger for the non-Gaussian field even after bandpass filtering.
+    assert np.abs(skewed[:, :, 1]).mean() > 1.5 * np.abs(gauss[:, :, 1]).mean()
+    assert np.abs(skewed[:, :, 2]).mean() > 1.5 * np.abs(gauss[:, :, 2]).mean()

@@ -92,7 +92,7 @@ The pipeline is:
 | `peak_counts.py` | Peak and minima counting statistics (Sabyr et al. 2024): `smooth_map`, `find_peaks`, `find_minima`, `count_peaks_binned`, `count_minima_binned`, `compute_peak_minima_counts`. numpy/scipy only. |
 | `scattering_stats.py` | Scattering transform statistics: `compute_scattering_coefficients` (S1, S2), `compute_scattering_covariance` (C11, Cheng et al. backend only), `scattering_summary`. Requires Cheng et al. repo or `kymatio`. |
 | `train.py` | Training entry point (not a library module — run via `accelerate launch`). CLI: `--run-name`, `--steps`, `--batch-size`, `--lr`, `--wandb` |
-| `sample.py` | Sampling entry point. CLI: `--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`, `--sampling-timesteps` (DDIM), `--wandb` |
+| `sample.py` | Sampling entry point. CLI: `--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`, `--sampling-timesteps` (DDIM), `--rescale-cib`/`--rescale-tsz` (opt-in post-sampling scalar rescaling, paper §3.2), `--wandb` |
 | `redundant/` | Old scripts kept for reference; not part of the active codebase |
 
 ### Key data conventions

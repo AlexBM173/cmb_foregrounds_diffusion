@@ -11,6 +11,20 @@ from foregrounds_diffusion.flatmaps import cl_to_cl2d, get_lxly
 
 
 def apply_maxmin_normalization(maps):
+    """Normalise an array to [0, 1] using global min–max scaling.
+
+    Parameters
+    ----------
+    maps : ndarray
+        Input array of any shape.  NaN values are ignored when computing
+        the range.
+
+    Returns
+    -------
+    ndarray
+        Normalised copy with values in [0, 1].  Returns an array of zeros
+        if ``max − min == 0`` (constant input).
+    """
     min_val = np.nanmin(maps)
     max_val = np.nanmax(maps)
     denom = max_val - min_val
@@ -20,6 +34,19 @@ def apply_maxmin_normalization(maps):
 
 
 def apply_stdnorm(maps):
+    """Z-score normalise each channel of a channels-last array independently.
+
+    Parameters
+    ----------
+    maps : ndarray, shape (..., C)
+        Array with channels in the last axis.
+
+    Returns
+    -------
+    ndarray, shape (..., C)
+        Copy with each channel shifted to zero mean and unit variance.
+        Channels with zero standard deviation are set to zero.
+    """
     maps = maps.copy()
     for c in range(maps.shape[-1]):
         channel = maps[..., c]

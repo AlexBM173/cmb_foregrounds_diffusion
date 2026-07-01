@@ -5,6 +5,7 @@ Sabyr, Hill & Haiman (2024), arXiv:2410.21247, adapted for
 flat-sky patches rather than full-sky maps.
 
 The pipeline:
+
 1. Smooth each patch with a Gaussian kernel at one or more angular scales.
 2. Identify local maxima (peaks) and local minima using scipy's
    ``maximum_filter`` / ``minimum_filter``.

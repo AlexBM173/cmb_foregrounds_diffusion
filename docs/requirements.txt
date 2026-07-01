@@ -1,0 +1,17 @@
+# Sphinx build dependencies for ReadTheDocs.
+# These are installed by RTD using docs/requirements.txt directly.
+# Do NOT list torch, healpy, or other heavy GPU packages here —
+# they are mocked in conf.py via autodoc_mock_imports.
+# Pin Sphinx to 7.x — nbsphinx 0.9.x is not compatible with Sphinx 8+.
+# RTD ubuntu-22.04 ships pandoc 3.x, which is required by nbsphinx.
+sphinx>=7,<8
+furo
+nbsphinx
+sphinx-copybutton
+sphinx-autodoc-typehints
+# Lightweight scientific stack available on RTD ubuntu-22.04
+numpy>=1.26
+scipy>=1.11
+cycler>=0.10
+matplotlib>=3.7
+joblib>=1.3

@@ -163,6 +163,15 @@ def main():
         ),
     )
     parser.add_argument(
+        "--compile",
+        action="store_true",
+        default=False,
+        help=(
+            "torch.compile the U-Net denoiser for faster sampling (PyTorch 2.0+). "
+            "Off by default; the first batch pays a one-off compilation cost."
+        ),
+    )
+    parser.add_argument(
         "--wandb",
         action="store_true",
         default=False,
@@ -191,6 +200,7 @@ def main():
                 "sampling_timesteps": args.sampling_timesteps or 1000,
                 "rescale_cib": args.rescale_cib or 1.0,
                 "rescale_tsz": args.rescale_tsz or 1.0,
+                "compile": args.compile,
             },
         )
 
@@ -200,6 +210,13 @@ def main():
     diffusion = build_model(channels=args.channels, sampling_timesteps=args.sampling_timesteps)
     diffusion = diffusion.to(accelerator.device)
     diffusion = load_checkpoint(diffusion, args.checkpoint, accelerator)
+
+    if args.compile:
+        # Compile the U-Net denoiser (called once per reverse step) rather than
+        # the whole GaussianDiffusion, whose .sample() has Python control flow.
+        # First batch pays a one-off compilation cost; later batches are faster.
+        print("Compiling U-Net with torch.compile (first batch includes warm-up) …")
+        diffusion.model = torch.compile(diffusion.model)
 
     print(f"Generating {args.batches * args.batch_size} samples …")
     all_samples = sample(

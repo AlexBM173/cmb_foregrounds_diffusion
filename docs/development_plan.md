@@ -24,6 +24,7 @@ because the cluster is down. Phases 1–6 are all in scope.
 | §2.4 Benchmark notebook | ✅ Complete |
 | §2.6a Numba JIT | ✅ Skipped — scipy owns 67% of cost, accumulation < 3% |
 | §2.6b–c NumPy vectorisation + ℓ-bin precompute | ✅ Complete |
+| §2.6f `torch.compile` sampling | ✅ Complete (opt-in `--compile` flag) |
 | §3.2 `n_jobs` on two bottleneck functions | ✅ Complete |
 | §3.3 GPU port `map2cl_torch` | ✅ Complete |
 | §6.1–6.4 CI foundation (tests.yml + lint.yml) | ✅ Complete |
@@ -716,13 +717,16 @@ scalar (for low- or high-pass) or a `(lmin, lmax)` pair (for band-pass,
 does not apply to it. Prevents silent internal copies in
 numpy's FFT when arrays arrive in non-standard memory order.
 
-**f) `torch.compile` for sampling**
+**f) `torch.compile` for sampling — ✅ implemented**
 
 ```python
-diffusion = torch.compile(diffusion)   # PyTorch 2.0+
+diffusion.model = torch.compile(diffusion.model)   # PyTorch 2.0+
 ```
-Expected 20–40% speedup on repeated forward passes. Add `--no-compile` flag
-to `sample.py` to disable for debugging.
+Compiles the U-Net denoiser (called once per reverse step) rather than the
+whole `GaussianDiffusion`, whose `.sample()` has Python control flow.
+Expected 20–40% speedup on repeated forward passes after a one-off warm-up.
+Exposed as an **opt-in** `--compile` flag on `sample.py` (default off) and a
+`USE_COMPILE` toggle in `sample_slurm.sh`.
 
 **g) Cython — fallback if Numba insufficient**
 

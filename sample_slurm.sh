@@ -24,6 +24,7 @@ BATCH_SIZE=16                              # samples per batch (per GPU)
 SAMPLING_TIMESTEPS=""                      # leave empty for full DDPM (1000 steps); set e.g. 250 for DDIM
 RESCALE_CIB=""                             # optional post-sampling scalar (paper §3.2); Prabhu et al. use 1.0328
 RESCALE_TSZ=""                             # optional post-sampling scalar (paper §3.2); Prabhu et al. use 1.1425
+USE_COMPILE=false                          # set to true to torch.compile the U-Net (faster after warm-up)
 USE_WANDB=false                            # set to true to enable WandB logging
 
 # ---------------------------------------------------------------------------
@@ -64,6 +65,11 @@ if [ -n "${RESCALE_TSZ}" ]; then
     RESCALE_FLAG="${RESCALE_FLAG} --rescale-tsz ${RESCALE_TSZ}"
 fi
 
+COMPILE_FLAG=""
+if [ "${USE_COMPILE}" = "true" ]; then
+    COMPILE_FLAG="--compile"
+fi
+
 accelerate launch --multi_gpu --num_processes 4 \
     ~/cmb_foregrounds_diffusion/foregrounds_diffusion/sample.py \
     --checkpoint "${CHECKPOINT}" \
@@ -72,4 +78,5 @@ accelerate launch --multi_gpu --num_processes 4 \
     --output "${OUTPUT}" \
     ${DDIM_FLAG} \
     ${RESCALE_FLAG} \
+    ${COMPILE_FLAG} \
     ${WANDB_FLAG}

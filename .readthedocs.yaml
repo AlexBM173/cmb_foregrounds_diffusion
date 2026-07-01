@@ -16,4 +16,7 @@ python:
 
 sphinx:
   configuration: docs/conf.py
-  fail_on_warning: false
+  # Warnings fail the build so broken cross-refs / malformed docstrings are
+  # caught. The docs.yml CI job uses the same -W setting. Requires ipykernel
+  # in docs/requirements.txt for the ipython3 lexer (else per-cell warnings).
+  fail_on_warning: true

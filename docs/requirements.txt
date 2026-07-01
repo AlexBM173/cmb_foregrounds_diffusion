@@ -9,6 +9,10 @@ sphinx-rtd-theme
 nbsphinx
 sphinx-copybutton
 sphinx-autodoc-typehints
+# ipykernel provides IPython, which registers the 'ipython3' Pygments lexer
+# used by the notebook code cells. Without it nbsphinx emits a warning per
+# cell, which fails the -W build (docs.yml) and RTD fail_on_warning.
+ipykernel
 # Lightweight scientific stack available on RTD ubuntu-22.04
 numpy>=1.26
 scipy>=1.11

@@ -38,7 +38,7 @@ The `foregrounds_diffusion/` package provides the following modules:
 | `peak_counts.py` | Peak and minima counting statistics following Sabyr et al. (2024): `smooth_map`, `find_peaks`, `count_peaks_binned`, `compute_peak_minima_counts`. Requires only numpy/scipy. |
 | `scattering_stats.py` | Scattering transform statistics: `compute_scattering_coefficients` (S1, S2), `compute_scattering_covariance` (C11), `scattering_summary`. Supports Cheng et al. or kymatio backends. |
 | `train.py` | Training entry point (run via `accelerate launch train.py`). CLI: `--run-name`, `--steps`, `--batch-size`, `--lr`, `--wandb`. |
-| `sample.py` | Sampling entry point (run via `accelerate launch sample.py`). CLI: `--checkpoint`, `--batches`, `--batch-size`, `--output`, `--sampling-timesteps` (DDIM), `--wandb`. |
+| `sample.py` | Sampling entry point (run via `accelerate launch foregrounds_diffusion/sample.py`). CLI: `--checkpoint`, `--batches`, `--batch-size`, `--output`, `--sampling-timesteps` (DDIM), `--wandb`. |
 
 ## Installation
 

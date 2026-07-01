@@ -130,7 +130,12 @@ def renormalize_dm_maps(dm_maps, train_maps, variance_scaling=True):
             dm_std = np.std(dm_maps[:, :, :, i])
             tr_mean = np.mean(train_maps[:, :, :, i])
             tr_std = np.std(train_maps[:, :, :, i])
-            dm_maps[:, :, :, i] = (dm_maps[:, :, :, i] - dm_mean) * (tr_std / dm_std) + tr_mean
+            if dm_std == 0:
+                # Constant channel: shift the mean only, skip the (tr_std/dm_std)
+                # scaling that would otherwise divide by zero and produce NaNs.
+                dm_maps[:, :, :, i] = dm_maps[:, :, :, i] - dm_mean + tr_mean
+            else:
+                dm_maps[:, :, :, i] = (dm_maps[:, :, :, i] - dm_mean) * (tr_std / dm_std) + tr_mean
 
     return np.transpose(dm_maps, (0, 3, 1, 2))
 

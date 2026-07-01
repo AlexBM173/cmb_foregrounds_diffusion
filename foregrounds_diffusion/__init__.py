@@ -28,14 +28,14 @@ masking
     Flat-sky peak masks and HEALPix cluster/point-source masks for AGORA
     MDPL2 maps.
 
-diffusion
-    Model definition (U-Net + GaussianDiffusion).
-
 train
-    Training entry point (run via ``accelerate launch train.py``).
+    Training entry point (repository-root script ``train.py``; run via
+    ``accelerate launch train.py``).
 
 sample
-    Sampling entry point (run via ``accelerate launch sample.py``).
+    Sampling entry point and reusable helpers (``build_model``,
+    ``load_checkpoint``, ``sample``); run via
+    ``accelerate launch foregrounds_diffusion/sample.py``.
 """
 
 __all__ = [

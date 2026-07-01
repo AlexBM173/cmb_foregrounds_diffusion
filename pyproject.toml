@@ -47,7 +47,7 @@ markers = ["optional: mark test as optional (skipped when dep missing)"]
 
 [tool.ruff]
 line-length = 100
-exclude = ["foregrounds_diffusion/redundant/", "*.ipynb"]
+exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
@@ -61,7 +61,7 @@ ignore = [
 ignore_missing_imports = true
 allow_untyped_defs = true
 allow_untyped_calls = true
-exclude = ["foregrounds_diffusion/redundant/"]
+exclude = []
 
 [project.scripts]
 fd-sample = "foregrounds_diffusion.sample:main"

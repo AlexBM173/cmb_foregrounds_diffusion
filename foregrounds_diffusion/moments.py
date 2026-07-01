@@ -7,7 +7,17 @@ from foregrounds_diffusion.flatmaps import _build_ell_bin_cache, bandpass_filter
 # ---------------------------------------------------------------------------
 
 
-def mean_cls(maps_nhw, mapparams, lmin, lmax, binsize):
+def _mean_cls_one(m, mapparams, lmin, lmax, binsize, cache):
+    return map2cl(mapparams, m, binsize=binsize, minbin=lmin, maxbin=lmax, _ell_bin_cache=cache)
+
+
+def _mean_cross_cls_one(m1, m2, mapparams, lmin, lmax, binsize, cache):
+    return map2cl(
+        mapparams, m1, m2, binsize=binsize, minbin=lmin, maxbin=lmax, _ell_bin_cache=cache
+    )
+
+
+def mean_cls(maps_nhw, mapparams, lmin, lmax, binsize, n_jobs=1):
     """Compute mean auto-power spectrum over a stack of maps.
 
     Parameters
@@ -20,6 +30,8 @@ def mean_cls(maps_nhw, mapparams, lmin, lmax, binsize):
         Multipole range.
     binsize : float
         Bin width in ℓ.
+    n_jobs : int
+        Number of parallel workers (joblib).  1 = serial (default).  -1 = all cores.
 
     Returns
     -------
@@ -31,6 +43,17 @@ def mean_cls(maps_nhw, mapparams, lmin, lmax, binsize):
         Standard deviation across maps.
     """
     cache = _build_ell_bin_cache(mapparams, binsize=binsize, minbin=lmin, maxbin=lmax)
+
+    if n_jobs != 1:
+        from joblib import Parallel, delayed
+
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(_mean_cls_one)(m, mapparams, lmin, lmax, binsize, cache) for m in maps_nhw
+        )
+        el = results[0][0]
+        cls = np.array([r[1] for r in results])
+        return el, cls.mean(axis=0), cls.std(axis=0)
+
     cls = []
     for m in maps_nhw:
         el, cl = map2cl(
@@ -41,7 +64,7 @@ def mean_cls(maps_nhw, mapparams, lmin, lmax, binsize):
     return el, cls.mean(axis=0), cls.std(axis=0)
 
 
-def mean_cross_cls(maps1, maps2, mapparams, lmin, lmax, binsize):
+def mean_cross_cls(maps1, maps2, mapparams, lmin, lmax, binsize, n_jobs=1):
     """Compute mean cross-power spectrum between two stacks of maps.
 
     Parameters
@@ -54,6 +77,8 @@ def mean_cross_cls(maps1, maps2, mapparams, lmin, lmax, binsize):
         Multipole range.
     binsize : float
         Bin width in ℓ.
+    n_jobs : int
+        Number of parallel workers (joblib).  1 = serial (default).  -1 = all cores.
 
     Returns
     -------
@@ -62,6 +87,18 @@ def mean_cross_cls(maps1, maps2, mapparams, lmin, lmax, binsize):
     std_cl : ndarray
     """
     cache = _build_ell_bin_cache(mapparams, binsize=binsize, minbin=lmin, maxbin=lmax)
+
+    if n_jobs != 1:
+        from joblib import Parallel, delayed
+
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(_mean_cross_cls_one)(m1, m2, mapparams, lmin, lmax, binsize, cache)
+            for m1, m2 in zip(maps1, maps2)
+        )
+        el = results[0][0]
+        cls = np.array([r[1] for r in results])
+        return el, cls.mean(axis=0), cls.std(axis=0)
+
     cls = []
     for m1, m2 in zip(maps1, maps2):
         el, cl = map2cl(
@@ -77,7 +114,20 @@ def mean_cross_cls(maps1, maps2, mapparams, lmin, lmax, binsize):
 # ---------------------------------------------------------------------------
 
 
-def compute_summed_moments(cib_arr, tsz_arr, bp_filters):
+def _summed_moments_one_map(cib, tsz, bp_filters):
+    """Compute S2, S3, S4 for a single CIB+tSZ map pair across all ℓ-bands."""
+    B = len(bp_filters)
+    out = np.zeros((B, 3))
+    for b, bp in enumerate(bp_filters):
+        filtered = bandpass_filter(cib + tsz, bp)
+        var = np.var(filtered)
+        out[b, 0] = var
+        out[b, 1] = np.mean(filtered**3) / var**1.5 if var > 0 else 0.0
+        out[b, 2] = (np.mean(filtered**4) / var**2 - 3.0) if var > 0 else 0.0
+    return out
+
+
+def compute_summed_moments(cib_arr, tsz_arr, bp_filters, n_jobs=1):
     """Compute S2, S3, S4 of the summed CIB+tSZ field per ℓ-band.
 
     Parameters
@@ -86,22 +136,32 @@ def compute_summed_moments(cib_arr, tsz_arr, bp_filters):
     tsz_arr : ndarray, shape (N, H, W)
     bp_filters : list of ndarray
         2D bandpass filters from :func:`~foregrounds_diffusion.flatmaps.get_lpf_hpf`.
+    n_jobs : int
+        Number of parallel workers (joblib).  1 = serial (default).  -1 = all cores.
 
     Returns
     -------
     ndarray, shape (N, len(bp_filters), 3)
         Columns: variance (S2), skewness (S3), excess kurtosis (S4).
     """
+    if n_jobs != 1:
+        from joblib import Parallel, delayed
+
+        rows = Parallel(n_jobs=n_jobs)(
+            delayed(_summed_moments_one_map)(cib_arr[i], tsz_arr[i], bp_filters)
+            for i in range(len(cib_arr))
+        )
+        return np.stack(rows, axis=0)
+
     N = len(cib_arr)
     moments = np.zeros((N, len(bp_filters), 3))
     for b, bp in enumerate(bp_filters):
         for i in range(N):
             filtered = bandpass_filter(cib_arr[i] + tsz_arr[i], bp)
             var = np.var(filtered)
-            s2 = var
-            s3 = np.mean(filtered**3) / var**1.5 if var > 0 else 0.0
-            s4 = (np.mean(filtered**4) / var**2 - 3.0) if var > 0 else 0.0
-            moments[i, b] = [s2, s3, s4]
+            moments[i, b, 0] = var
+            moments[i, b, 1] = np.mean(filtered**3) / var**1.5 if var > 0 else 0.0
+            moments[i, b, 2] = (np.mean(filtered**4) / var**2 - 3.0) if var > 0 else 0.0
     return moments
 
 

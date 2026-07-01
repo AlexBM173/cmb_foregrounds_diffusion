@@ -103,3 +103,29 @@ def test_compute_cross_moments_shape(patch_stack, flatskymapparams, bp_filters):
 def test_compute_cross_moments_labels(patch_stack, flatskymapparams, bp_filters):
     _, labels = compute_cross_moments(patch_stack, patch_stack, bp_filters)
     assert labels == _EXPECTED_LABELS
+
+
+# ---------------------------------------------------------------------------
+# n_jobs parallelism: serial == parallel
+# ---------------------------------------------------------------------------
+
+
+def test_mean_cls_parallel_matches_serial(patch_stack, flatskymapparams):
+    el_s, cl_s, std_s = mean_cls(patch_stack, flatskymapparams, 300, 4000, 100, n_jobs=1)
+    el_p, cl_p, std_p = mean_cls(patch_stack, flatskymapparams, 300, 4000, 100, n_jobs=2)
+    np.testing.assert_array_equal(el_s, el_p)
+    np.testing.assert_allclose(cl_s, cl_p, rtol=1e-10)
+    np.testing.assert_allclose(std_s, std_p, rtol=1e-10)
+
+
+def test_compute_summed_moments_parallel_matches_serial(patch_stack, bp_filters):
+    serial = compute_summed_moments(patch_stack, patch_stack, bp_filters, n_jobs=1)
+    parallel = compute_summed_moments(patch_stack, patch_stack, bp_filters, n_jobs=2)
+    np.testing.assert_allclose(serial, parallel, rtol=1e-10)
+
+
+def test_compute_cross_moments_parallel_matches_serial(patch_stack, bp_filters):
+    s_out, s_labels = compute_cross_moments(patch_stack, patch_stack, bp_filters, n_jobs=1)
+    p_out, p_labels = compute_cross_moments(patch_stack, patch_stack, bp_filters, n_jobs=2)
+    np.testing.assert_allclose(s_out, p_out, rtol=1e-10)
+    assert s_labels == p_labels

@@ -107,6 +107,35 @@ def find_minima(patch, filter_size=3):
 # ---------------------------------------------------------------------------
 
 
+def _peak_minima_one_map(
+    patch,
+    thresholds_peaks,
+    thresholds_minima,
+    smoothing_scales_arcmin,
+    pixel_res_arcmin,
+    filter_size,
+):
+    """Compute peak and minima counts for a single map across all smoothing scales."""
+    result = {}
+    for fwhm in smoothing_scales_arcmin:
+        smoothed = smooth_map(patch, fwhm, pixel_res_arcmin)
+        sigma = smoothed.std()
+        if sigma == 0:
+            result[fwhm] = {
+                "peaks": np.zeros(len(thresholds_peaks)),
+                "minima": np.zeros(len(thresholds_minima)),
+            }
+            continue
+        nu_map = smoothed / sigma
+        peak_vals = find_peaks(nu_map, filter_size=filter_size)
+        minima_vals = find_minima(nu_map, filter_size=filter_size)
+        result[fwhm] = {
+            "peaks": np.array([(peak_vals > t).sum() for t in thresholds_peaks], dtype=float),
+            "minima": np.array([(minima_vals < t).sum() for t in thresholds_minima], dtype=float),
+        }
+    return result
+
+
 def count_peaks_binned(
     patches_nhw, thresholds, fwhm_arcmin, pixel_res_arcmin=1.40625, filter_size=3
 ):
@@ -203,6 +232,7 @@ def compute_peak_minima_counts(
     smoothing_scales_arcmin=(1.0, 2.5, 5.0),
     pixel_res_arcmin=1.40625,
     filter_size=3,
+    n_jobs=1,
 ):
     """Compute peak and minima counts at multiple smoothing scales.
 
@@ -220,6 +250,10 @@ def compute_peak_minima_counts(
         Pixel resolution in arcmin.
     filter_size : int
         Neighbourhood size for local extremum detection.
+    n_jobs : int
+        Number of parallel workers (joblib).  1 = serial (default).  -1 = all cores.
+        When n_jobs != 1, all smoothing scales are processed together per map,
+        eliminating redundant smoothing passes.
 
     Returns
     -------
@@ -234,6 +268,28 @@ def compute_peak_minima_counts(
     ...     tsz_patches, thresholds_peaks, thresholds_minima)
     >>> mean_peaks = results[1.0]['peaks'].mean(axis=0)
     """
+    if n_jobs != 1:
+        from joblib import Parallel, delayed
+
+        per_map = Parallel(n_jobs=n_jobs)(
+            delayed(_peak_minima_one_map)(
+                patch,
+                thresholds_peaks,
+                thresholds_minima,
+                smoothing_scales_arcmin,
+                pixel_res_arcmin,
+                filter_size,
+            )
+            for patch in patches_nhw
+        )
+        results = {}
+        for fwhm in smoothing_scales_arcmin:
+            results[fwhm] = {
+                "peaks": np.stack([r[fwhm]["peaks"] for r in per_map], axis=0),
+                "minima": np.stack([r[fwhm]["minima"] for r in per_map], axis=0),
+            }
+        return results
+
     results = {}
     for fwhm in smoothing_scales_arcmin:
         print(f"Computing counts at FWHM = {fwhm} arcmin …")

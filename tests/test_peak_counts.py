@@ -212,3 +212,25 @@ def test_compute_peak_minima_counts_shapes(patch_stack):
     )
     assert results[3.0]["peaks"].shape == (N, 12)
     assert results[3.0]["minima"].shape == (N, 8)
+
+
+def test_compute_peak_minima_counts_parallel_matches_serial(patch_stack):
+    thresholds_p = np.linspace(-1, 4, 8)
+    thresholds_m = np.linspace(-4, 1, 6)
+    serial = compute_peak_minima_counts(
+        patch_stack,
+        thresholds_p,
+        thresholds_m,
+        smoothing_scales_arcmin=(2.0, 5.0),
+        n_jobs=1,
+    )
+    parallel = compute_peak_minima_counts(
+        patch_stack,
+        thresholds_p,
+        thresholds_m,
+        smoothing_scales_arcmin=(2.0, 5.0),
+        n_jobs=2,
+    )
+    for fwhm in (2.0, 5.0):
+        np.testing.assert_array_equal(serial[fwhm]["peaks"], parallel[fwhm]["peaks"])
+        np.testing.assert_array_equal(serial[fwhm]["minima"], parallel[fwhm]["minima"])

@@ -6,7 +6,7 @@ from scipy.ndimage import binary_erosion, sobel
 # ---------------------------------------------------------------------------
 
 
-def compute_mfs(maps_nhw, norm_fn, thresholds):
+def compute_mfs(maps_nhw, norm_fn, thresholds, n_jobs=1):
     """Compute Minkowski functionals M0, M1, M2 across a stack of maps.
 
     Requires the ``quantimpy`` package (Boelens & Tchelepi 2021).
@@ -19,12 +19,23 @@ def compute_mfs(maps_nhw, norm_fn, thresholds):
         (e.g. :func:`~foregrounds_diffusion.preprocessing.apply_maxmin_normalization`).
     thresholds : array_like
         Intensity thresholds ν.
+    n_jobs : int
+        Number of parallel workers (joblib).  1 = serial (default).  -1 = all cores.
 
     Returns
     -------
     M0, M1, M2 : ndarray, each shape (N, len(thresholds))
         M0 = area fraction, M1 = perimeter, M2 = Euler characteristic.
     """
+    if n_jobs != 1:
+        from joblib import Parallel, delayed
+
+        chunks = np.array_split(maps_nhw, abs(n_jobs) if n_jobs != -1 else len(maps_nhw))
+        parts = Parallel(n_jobs=n_jobs)(
+            delayed(compute_mfs)(chunk, norm_fn, thresholds, n_jobs=1) for chunk in chunks
+        )
+        return tuple(np.concatenate([p[i] for p in parts], axis=0) for i in range(3))
+
     from quantimpy import minkowski as mk
 
     M0 = np.zeros((len(maps_nhw), len(thresholds)))

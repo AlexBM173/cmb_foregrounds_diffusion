@@ -33,9 +33,169 @@ because the cluster is down. Phases 1–6 are all in scope.
 | §3.2 `n_jobs` on remaining functions + scaling plots | ✅ Complete |
 | §3.4–3.5 Multi-GPU + MPI evaluation | To do (cluster dependent) |
 | §3.7 SLURM array eval jobs | To do |
-| §4 Documentation + ReadTheDocs | ✅ Complete (connect RTD manually per §4.4) |
-| §5 PyPI distribution | ✅ Complete (publish.yml + Trusted Publisher; tag v0.1.0 to release) |
-| §6.5 Additional CI/CD | ✅ Complete (pip-audit, dependency-review, pre-commit; b/d/e/f/g skipped as overkill) |
+| §4 Documentation + ReadTheDocs | ✅ Complete — all guide pages, API prose, module docstrings, RTD connected, docs CI (`docs.yml`), RTD theme |
+| §5 PyPI distribution | ✅ Complete (publish.yml + Trusted Publisher; `v0.1.0` live on PyPI, `v0.1.1` tagged) |
+| §6.5 Additional CI/CD | ✅ Complete (pip-audit, dependency-review, pre-commit, docs build CI; b/d/e/f/g skipped as overkill) |
+
+---
+
+## Cluster action plan — when the cluster comes back online
+
+**Deadline: 2026-07-08. Time budget: run sampling first, then statistics in
+parallel, then paper figures. Everything below is copy-paste ready.**
+
+The cluster action plan is the only remaining critical-path work. §3.4, §3.5,
+and §3.7 below contain the supporting code; this section is the operational
+checklist.
+
+### Step 0 — First things on login
+
+```bash
+# Pull latest code and activate the project env
+cd ~/projects/cmb_foregrounds_diffusion
+git pull
+source ~/activate_diffusion_project_env.sh
+
+# Verify GPU availability and check what checkpoint exists
+squeue -u $USER
+ls results/*/model-*.pt | sort -V | tail -5
+nvidia-smi   # if on a login node with GPUs
+```
+
+Identify the best checkpoint. The default is `results/v3_zscore_no_cib_cluster_mask/model-20.pt`.
+Confirm it exists and note its path — you will use it in every command below.
+
+---
+
+### Step 1 — Sample (submit immediately)
+
+Edit `sample_slurm.sh` and set:
+
+```bash
+CHECKPOINT="results/v3_zscore_no_cib_cluster_mask/model-20.pt"
+OUTPUT="data/low_pass/2mJy/samples_v3_ddpm1000.npy"
+BATCHES=40        # 40 × 16 × 4 GPUs = 2560 samples
+BATCH_SIZE=16
+SAMPLING_TIMESTEPS=""   # full DDPM (1000 steps); or set to 250 for DDIM
+USE_WANDB="false"
+```
+
+Then submit:
+```bash
+sbatch sample_slurm.sh
+```
+
+While this runs (expected: ~2 h on 4 A100s for 2560 samples at 1000 steps,
+~30 min for 250-step DDIM), proceed to Step 2 to set up the statistics run.
+
+Also generate a Gaussian baseline if one does not already exist at
+`data/low_pass/2mJy/gaussian_cib_tsz_2mJy_lp.npy` — see tutorial 05 section
+on Gaussian baseline generation.
+
+---
+
+### Step 2 — Run statistics notebooks (as soon as samples land)
+
+Notebooks 06–12 are independent of each other and can be submitted as
+separate SLURM jobs or run interactively in a Jupyter session. Minimum
+required for the thesis figures: **06, 07, 08, 09**. Notebooks 10–12 are
+extended statistics.
+
+Notebook dependencies:
+- 06, 07, 08, 09, 10, 11, 12 all load `samples_v3_ddpm1000.npy` — run
+  after Step 1 completes.
+- 14 (paper figures) depends on outputs from 06–09.
+
+**Interactive Jupyter session (if cluster allows):**
+```bash
+# Request an interactive GPU node
+srun --account=mphil-dis-sl2-gpu --partition=ampere \
+     --gres=gpu:1 --cpus-per-task=8 --mem=64G --time=04:00:00 \
+     --pty bash
+
+source ~/activate_diffusion_project_env.sh
+cd ~/projects/cmb_foregrounds_diffusion
+jupyter lab --no-browser --port=8888 &
+# Then SSH tunnel: ssh -NL 8888:localhost:8888 <cluster>
+```
+
+Run notebooks 06–09 first (core paper statistics). Then 10–12 if time
+permits. Then 14 to generate the final paper figures.
+
+**Alternatively, convert and run as SLURM batch jobs:**
+```bash
+# One SLURM job per notebook — submit all at once after samples land
+for NB in 06 07 08 09; do
+    sbatch --wrap="source ~/activate_diffusion_project_env.sh && \
+        jupyter nbconvert --to notebook --execute \
+        --ExecutePreprocessor.timeout=7200 \
+        --ExecutePreprocessor.kernel_name=python3 \
+        --inplace docs/tutorials/${NB}_*.ipynb" \
+        --account=mphil-dis-sl2-gpu --partition=ampere \
+        --gres=gpu:1 --cpus-per-task=8 --mem=64G --time=04:00:00 \
+        --output=logs/nb_${NB}_%j.out
+done
+```
+
+Each notebook saves its figures to `plots/` and its computed statistics to
+intermediate `.npy` / `.npz` files — check the output path in the first
+config cell of each notebook.
+
+---
+
+### Step 3 — Multi-GPU statistics (§3.4)
+
+For the computationally heavy statistics (Minkowski tensors, cross-moments)
+over the full 2560-sample set, use the joblib parallel wrapper that's already
+in the codebase. The `n_jobs` parameter is available on:
+- `compute_minkowski_tensors` — pass `n_jobs=-1`
+- `compute_cross_moments` — use `parallel_cross_moments` wrapper (§3.2)
+- `compute_peak_minima_counts` — pass `n_jobs=-1`
+
+In each statistics notebook, set at the top:
+```python
+N_JOBS = 16   # or however many CPUs the SLURM job was allocated
+```
+and pass it to the relevant calls. The notebooks already import `joblib` via
+the module functions — no extra setup needed.
+
+---
+
+### Step 4 — SLURM array over checkpoints (§3.7, optional)
+
+If time permits and you want statistics at multiple training milestones
+(to show convergence in the thesis), see the `eval_slurm_array.sh` template
+in §3.7 below. This requires `eval.py` (§3.10 step 5), which has not yet
+been written — skip this step unless convergence plots are needed for the thesis.
+
+---
+
+### Step 5 — Paper figures (notebook 14)
+
+Run tutorial 14 last, after 06–09 have finished. It loads the precomputed
+statistics from those notebooks and assembles the final paper figures.
+
+Check `14_paper_figures.ipynb` cell 1 for the paths it expects. Update
+`CHECKPOINT` and the sample file path to match what was generated in Step 1.
+
+All figures are saved to `plots/paper/` as both PDF (for LaTeX) and PNG
+(300 dpi backup). Commit the figures directory to a separate branch or
+attach to the thesis submission — do NOT commit large PDFs to `main`.
+
+---
+
+### What is already done (no cluster needed)
+
+| Item | Status |
+|---|---|
+| Trained checkpoint `v3_zscore_no_cib_cluster_mask/model-20.pt` | ✅ On cluster |
+| `sample_slurm.sh` with DDIM flag | ✅ Ready to submit |
+| DDIM sampling (`--sampling-timesteps 250`) | ✅ Implemented and tested |
+| Statistics modules (06–12) | ✅ All notebooks complete |
+| Paper figures notebook (14) | ✅ Written, needs sample data |
+| `n_jobs` on `compute_minkowski_tensors`, `compute_cross_moments`, `compute_peak_minima_counts`, `select_snr_pixels` | ✅ In codebase |
+| `map2cl_torch` GPU port | ✅ In codebase, equivalence-tested |
+| All statistics unit-tested | ✅ 125 tests pass |
 
 ---
 
@@ -1022,17 +1182,20 @@ available VRAM with `nvidia-smi` before running and reduce batch size if needed.
 
 ### 3.7 SLURM array jobs for coarse-grained evaluation
 
-For tasks that are independent across checkpoints, seeds, or dataset splits, SLURM
-array jobs are the simplest parallelisation with no code changes beyond reading
-`$SLURM_ARRAY_TASK_ID`.
+**Purpose:** generate statistics at multiple training milestones in parallel,
+to show convergence curves in the thesis (e.g. power spectrum error vs
+training step). Each array task samples from one checkpoint and runs all
+statistics, saving results to a per-milestone NPZ.
 
-**`eval_slurm_array.sh` — evaluate statistics across multiple checkpoints:**
+**Prerequisite:** `foregrounds_diffusion/eval.py` must exist (§3.10 step 5).
+
+**`eval_slurm_array.sh`:**
 
 ```bash
 #!/bin/bash
 #SBATCH --job-name=cmb_eval
 #SBATCH --account=mphil-dis-sl2-gpu
-#SBATCH --array=0-9              # 10 checkpoints in parallel
+#SBATCH --array=0-9              # tasks 0–9 → checkpoints model-5 through model-50
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
@@ -1044,26 +1207,59 @@ array jobs are the simplest parallelisation with no code changes beyond reading
 #SBATCH --error=logs/eval_%A_%a.err
 
 TASK_ID=$SLURM_ARRAY_TASK_ID
-CHECKPOINT="results/run_v1/model-$((TASK_ID * 5 + 5)).pt"   # checkpoints 5, 10, ..., 50
-OUTPUT="results/eval/stats_milestone_${TASK_ID}.npz"
+RUN="v3_zscore_no_cib_cluster_mask"
+CHECKPOINT="results/${RUN}/model-$((TASK_ID * 5 + 5)).pt"
+OUTPUT="results/eval/${RUN}/stats_milestone_${TASK_ID}.npz"
+AGORA_CIB="data/low_pass/2mJy/CIB_map_150GHz_256_st6_zscore_2mJy_lp.npy"
+AGORA_TSZ="data/low_pass/2mJy/tSZ3_map_150GHz_256_st6_zscore_2mJy_lp.npy"
+NORM_PARAMS="data/low_pass/2mJy/norm_params_2mJy.npy"
 
-# Activate the project venv (script lives in home directory)
+mkdir -p results/eval/${RUN} logs
+
 source "$HOME/activate_diffusion_project_env.sh"
 
-# eval.py must be created as part of Phase 3 (§3.10 step 5).
-# It should accept --checkpoint, --output, and --n-jobs and run all
-# evaluation statistics from §2.2 on the generated samples.
-python foregrounds_diffusion/eval.py \
-    --checkpoint "$CHECKPOINT" \
-    --output "$OUTPUT" \
-    --n-jobs 16
+accelerate launch foregrounds_diffusion/eval.py \
+    --checkpoint  "$CHECKPOINT" \
+    --output      "$OUTPUT" \
+    --agora-cib   "$AGORA_CIB" \
+    --agora-tsz   "$AGORA_TSZ" \
+    --norm-params "$NORM_PARAMS" \
+    --n-samples   512 \
+    --batch-size  16 \
+    --n-jobs      16
 ```
 
-Collect results after all array tasks complete:
+Submit:
+```bash
+mkdir -p logs
+sbatch eval_slurm_array.sh
+# monitor
+squeue -u $USER
+```
+
+Collect and compare after all tasks finish:
 ```python
 import numpy as np, glob
-files = sorted(glob.glob("results/eval/stats_milestone_*.npz"))
-all_stats = [np.load(f) for f in files]
+
+files = sorted(glob.glob("results/eval/v3_zscore_no_cib_cluster_mask/stats_milestone_*.npz"))
+milestones = []
+for f in files:
+    d = np.load(f, allow_pickle=True)
+    milestones.append({
+        'step':    int(d['step']),
+        'cl_cib':  d['cl_cib'],    # (n_bins,) mean power spectrum error
+        'cl_tsz':  d['cl_tsz'],
+        'moments': d['moments'],    # (n_bands, 12) cross-moment residuals
+    })
+milestones.sort(key=lambda x: x['step'])
+
+# Plot convergence: power spectrum χ² vs training step
+import matplotlib.pyplot as plt
+steps = [m['step'] for m in milestones]
+cl_err = [np.mean((m['cl_cib'] - 1)**2) for m in milestones]  # fractional error
+plt.plot(steps, cl_err, marker='o')
+plt.xlabel('Training step'); plt.ylabel('Mean CIB Cℓ fractional error²')
+plt.yscale('log')
 ```
 
 ---
@@ -1163,18 +1359,204 @@ Also add a **parallel scaling summary table** to the benchmark notebook:
 
 ### 3.10 Implementation order
 
-1. Add `n_jobs` parameter to all functions in §3.2 (one PR per module)
-2. Benchmark `joblib` parallel on local machine (Figure 11, 12)
-3. Port `map2cl` to torch; benchmark GPU speedup (Figure 14) — requires CPU baselines from §2.2 sweeps
-4. Write `mpi4py` wrapper and test on 2 CSD3 nodes (Figure 13)
-5. Create `foregrounds_diffusion/eval.py` (CLI: `--checkpoint`, `--output`, `--n-jobs`,
-   `--agora-maps`, `--n-samples`; generates N DDPM samples from the checkpoint, loads the
-   AGORA training patches from `--agora-maps`, generates a matched Gaussian baseline via
-   `make_gaussian_realisation` using the AGORA measured power spectra, then runs all §2.2
-   statistics on all three sets — DDPM samples, AGORA truth, Gaussian baseline — and saves
-   results to `--output` as an NPZ); then write `eval_slurm_array.sh` and validate with 3 checkpoints
-6. Add `train_slurm_multinode.sh` (DDP, no DeepSpeed); validate on 2 nodes — **deferred post-thesis** per scope triage
-7. Benchmark multi-GPU evaluation (Figure 15)
+1. ✅ Add `n_jobs` parameter to all functions in §3.2 (one PR per module)
+2. ✅ Benchmark `joblib` parallel on local machine (Figure 11, 12)
+3. ✅ Port `map2cl` to torch; benchmark GPU speedup (Figure 14)
+4. Write `mpi4py` wrapper and test on 2 CSD3 nodes (Figure 13) — **cluster dependent**
+5. Create `foregrounds_diffusion/eval.py` — **cluster dependent; full spec below**
+6. Add `train_slurm_multinode.sh` (DDP, no DeepSpeed) — **deferred post-thesis**
+7. Benchmark multi-GPU evaluation (Figure 15) — **cluster dependent**
+
+---
+
+#### `eval.py` — full specification
+
+**Purpose:** single-command pipeline that samples from a checkpoint, loads
+AGORA truth patches, builds a Gaussian baseline, runs all evaluation
+statistics on all three sets, and saves results to NPZ.  Used by
+`eval_slurm_array.sh` (§3.7) to evaluate multiple checkpoints in parallel.
+
+**CLI:**
+```
+accelerate launch foregrounds_diffusion/eval.py \
+    --checkpoint  results/run/model-20.pt \
+    --output      results/eval/stats.npz \
+    --agora-cib   data/low_pass/2mJy/CIB_...npy \
+    --agora-tsz   data/low_pass/2mJy/tSZ3_...npy \
+    --norm-params data/low_pass/2mJy/norm_params_2mJy.npy \
+    --n-samples   512 \
+    --batch-size  16 \
+    --sampling-timesteps 250 \   # optional DDIM; default = full 1000-step DDPM
+    --n-jobs 16
+```
+
+**Implementation skeleton:**
+
+```python
+"""Unified evaluation script: sample → statistics → NPZ output."""
+import argparse, numpy as np
+from pathlib import Path
+from foregrounds_diffusion.sample import build_model, sample_batches
+from foregrounds_diffusion.preprocessing import (
+    apply_maxmin_normalization, apply_stdnorm,
+)
+from foregrounds_diffusion.flatmaps import make_gaussian_realisation
+from foregrounds_diffusion.moments import mean_cls, compute_cross_moments
+from foregrounds_diffusion.morphology import compute_minkowski_tensors
+from foregrounds_diffusion.stacking import select_snr_pixels, extract_cutouts
+from foregrounds_diffusion.peak_counts import compute_peak_minima_counts
+from foregrounds_diffusion.masking import get_peak_masks, inpaint_masked_regions
+
+FLATSKYMAPPARAMS = [256, 256, 1.40625, 1.40625]
+BP_EDGES = [(100, 500), (500, 1000), (1000, 2000), (2000, 4000), (4000, 7000)]
+THRESHOLDS = np.linspace(-3, 3, 30)
+SMOOTHING_SCALES = [1.0, 2.5, 5.0]   # arcmin FWHM, matching notebook 10
+PEAK_THRESHOLDS = np.linspace(-3, 3, 25)
+MINIMA_THRESHOLDS = np.linspace(-3, 0, 15)
+
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument('--checkpoint',  required=True)
+    p.add_argument('--output',      required=True)
+    p.add_argument('--agora-cib',   required=True)
+    p.add_argument('--agora-tsz',   required=True)
+    p.add_argument('--norm-params', required=True)
+    p.add_argument('--n-samples',   type=int, default=512)
+    p.add_argument('--batch-size',  type=int, default=16)
+    p.add_argument('--sampling-timesteps', type=int, default=None)
+    p.add_argument('--n-jobs',      type=int, default=1)
+    return p.parse_args()
+
+
+def run_statistics(cib, tsz, mapparams, bp_edges, n_jobs):
+    """Run all evaluation statistics on a (N,H,W) CIB and tSZ stack."""
+    from foregrounds_diffusion.flatmaps import get_lpf_hpf, bandpass_filter
+
+    # Build bandpass filters once
+    bp_filters = [
+        get_lpf_hpf(mapparams, (lmin, lmax), filter_type=2)
+        for lmin, lmax in bp_edges
+    ]
+
+    # Power spectra
+    el, cl_cib, cl_cib_std = mean_cls(
+        cib, mapparams, lmin=100, lmax=7000, binsize=200
+    )
+    _,  cl_tsz, cl_tsz_std = mean_cls(
+        tsz, mapparams, lmin=100, lmax=7000, binsize=200
+    )
+    _, cl_cross, cl_cross_std = mean_cls(
+        cib, mapparams, lmin=100, lmax=7000, binsize=200,
+        flatskymap2=tsz
+    )
+
+    # Cross-moments (12 combinations)
+    moments_out, labels = compute_cross_moments(
+        cib, tsz, bp_filters, n_jobs=n_jobs
+    )
+
+    # Minkowski tensors
+    mt = compute_minkowski_tensors(
+        tsz, lambda x: x, THRESHOLDS,
+        tensor_types=['W012'], n_jobs=n_jobs
+    )
+
+    # Peak / minima counts
+    pk = compute_peak_minima_counts(
+        tsz, PEAK_THRESHOLDS, MINIMA_THRESHOLDS, SMOOTHING_SCALES
+    )
+
+    return dict(
+        el=el,
+        cl_cib=cl_cib,     cl_cib_std=cl_cib_std,
+        cl_tsz=cl_tsz,     cl_tsz_std=cl_tsz_std,
+        cl_cross=cl_cross, cl_cross_std=cl_cross_std,
+        moments=moments_out, moment_labels=np.array(labels),
+        mt_beta=mt['W012']['beta'],
+        pk=pk,
+    )
+
+
+def main():
+    args = parse_args()
+
+    # ---- 1. Load AGORA patches and denormalise ----
+    norm = np.load(args.norm_params, allow_pickle=True).item()
+    agora_cib_raw = np.load(args.agora_cib)  # (N, H, W) or (N, H, W, 1)
+    agora_tsz_raw = np.load(args.agora_tsz)
+    if agora_cib_raw.ndim == 4:
+        agora_cib_raw = agora_cib_raw[..., 0]
+        agora_tsz_raw = agora_tsz_raw[..., 0]
+    n = min(args.n_samples, len(agora_cib_raw))
+    agora_cib = agora_cib_raw[:n] * (norm['cib_max'] - norm['cib_min']) + norm['cib_min']
+    agora_tsz = agora_tsz_raw[:n] * norm['tsz_std'] + norm['tsz_mean']
+
+    # ---- 2. Generate DDPM samples ----
+    model = build_model(channels=2, sampling_timesteps=args.sampling_timesteps)
+    import torch
+    ckpt = torch.load(args.checkpoint, map_location='cpu')
+    model.load_state_dict(ckpt['model'])
+    model.eval()
+    n_batches = (args.n_samples + args.batch_size - 1) // args.batch_size
+    samples = sample_batches(model, n_batches, args.batch_size)  # (N,2,H,W)
+    ddpm_cib = samples[:n, 0] * (norm['cib_max'] - norm['cib_min']) + norm['cib_min']
+    ddpm_tsz = samples[:n, 1] * norm['tsz_std'] + norm['tsz_mean']
+
+    # ---- 3. Gaussian baseline ----
+    el_agora, cl_agora_cib, _ = mean_cls(agora_cib, FLATSKYMAPPARAMS, 100, 7000, 200)
+    _, cl_agora_tsz, _ = mean_cls(agora_tsz, FLATSKYMAPPARAMS, 100, 7000, 200)
+    gauss_cib = np.stack([
+        make_gaussian_realisation(FLATSKYMAPPARAMS, el_agora, cl_agora_cib)
+        for _ in range(n)
+    ])
+    gauss_tsz = np.stack([
+        make_gaussian_realisation(FLATSKYMAPPARAMS, el_agora, cl_agora_tsz)
+        for _ in range(n)
+    ])
+
+    # ---- 4. Statistics on all three sets ----
+    print('Running statistics on AGORA ...')
+    stats_agora = run_statistics(agora_cib, agora_tsz, FLATSKYMAPPARAMS,
+                                 BP_EDGES, args.n_jobs)
+    print('Running statistics on DDPM ...')
+    stats_ddpm  = run_statistics(ddpm_cib,  ddpm_tsz,  FLATSKYMAPPARAMS,
+                                 BP_EDGES, args.n_jobs)
+    print('Running statistics on Gaussian ...')
+    stats_gauss = run_statistics(gauss_cib, gauss_tsz, FLATSKYMAPPARAMS,
+                                 BP_EDGES, args.n_jobs)
+
+    # ---- 5. Save ----
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        args.output,
+        step=int(Path(args.checkpoint).stem.split('-')[-1]),
+        checkpoint=args.checkpoint,
+        **{f'agora_{k}': v for k, v in stats_agora.items()},
+        **{f'ddpm_{k}':  v for k, v in stats_ddpm.items()},
+        **{f'gauss_{k}': v for k, v in stats_gauss.items()},
+    )
+    print(f'Saved → {args.output}')
+
+
+if __name__ == '__main__':
+    main()
+```
+
+**Key notes for implementation:**
+- `sample_batches` should be extracted from `sample.py` as a reusable
+  function that accepts a model and returns `(N, 2, H, W)` numpy array.
+  Currently `sample.py` is a script; refactor its inner loop into a function
+  importable by `eval.py`.
+- The `norm_params` NPZ must contain `cib_min`, `cib_max`, `tsz_mean`,
+  `tsz_std` — check the exact keys in `data/low_pass/2mJy/norm_params_2mJy.npy`
+  before writing the denormalisation code.
+- Minkowski functionals (`compute_mfs`) require `quantimpy` which may not
+  be installed on the cluster — wrap in a `try/except ImportError` and skip
+  if not available; log a warning.
+- `compute_peak_minima_counts` returns a nested dict; use
+  `np.savez(..., pk=np.array(pk, dtype=object))` to preserve the structure,
+  or flatten to arrays before saving.
 
 ---
 

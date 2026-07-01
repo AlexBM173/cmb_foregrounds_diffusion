@@ -38,16 +38,6 @@ sample
     Sampling entry point (run via ``accelerate launch sample.py``).
 """
 
-from foregrounds_diffusion import (
-    flatmaps,
-    masking,
-    moments,
-    morphology,
-    preprocessing,
-    stacking,
-    statistics,
-)
-
 __all__ = [
     "flatmaps",
     "preprocessing",
@@ -56,4 +46,7 @@ __all__ = [
     "morphology",
     "stacking",
     "masking",
+    "peak_counts",
+    "scattering_stats",
+    "plot_style",
 ]

@@ -35,7 +35,20 @@ Pass ``flatskymapparams`` to all ``flatmaps`` functions.
 Normalisation
 -------------
 
-Two normalisation schemes are used, one per channel:
+.. warning::
+
+   The normalisation scheme is currently **contested** between notebooks — see
+   inconsistency #7 in ``docs/paper_code_inconsistencies.md``.  Notebook 03 (the
+   data *producer*) z-scores **both** channels and saves ``_zscore_`` files with
+   ``norm_params = [cib_mean, cib_std, tsz_mean, tsz_std]``, which matches the
+   ``denormalize_dm_maps`` (``x·std+mean``) paragraph below and the checkpoint
+   name ``v3_zscore_...``.  The table immediately below documents the *legacy*
+   min–max scheme still referenced by notebooks 06–14's load filenames.  Confirm
+   which ``.npy`` files exist on disk and how the checkpoint was trained before
+   relying on either.
+
+Two normalisation schemes have been used, one per channel (legacy scheme shown;
+see the warning above):
 
 .. list-table::
    :header-rows: 1

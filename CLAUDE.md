@@ -99,7 +99,7 @@ The pipeline is:
 
 - **Channels-last on disk**: raw `.npy` arrays are `(N, H, W, C)` — transposed to channels-first `(N, C, H, W)` before entering PyTorch
 - **Preprocessing choices**: low-pass filter cuts `ℓ > 7000`; negative pixels from filtering artifacts are zeroed; point sources masked at 2 mJy threshold (masked pixels set to zero, not NaN)
-- **Normalisation**: CIB uses min-max to `[0, 1]` (`_zero` suffix files); tSZ uses std-normalisation (`_norm` suffix files)
+- **Normalisation**: ⚠ **contested — see `docs/paper_code_inconsistencies.md` #7.** Notebook 03 (the data producer) currently **z-scores both channels** and saves `_zscore_` files with `norm_params = [cib_mean, cib_std, tsz_mean, tsz_std]`; denormalise DDPM output with `denormalize_dm_maps` (`x·std+mean`, both channels). Older docs/notebooks (and `renormalize_dm_maps`) assume CIB min-max to `[0, 1]` (`_zero` suffix) + tSZ std-norm (`_norm` suffix). The checkpoint name `v3_zscore_...` favours z-score. Confirm against the on-disk files and the checkpoint's training normalisation before relying on either.
 - **Train/val/test split**: 80/10/10 by default, seeded with `np.random.default_rng(seed=42)`
 - **Model architecture**: U-Net with `dim=64`, `dim_mults=(1,2,4,8)`, `flash_attn=True`, 2 channels, 1000 diffusion timesteps
 

@@ -36,6 +36,15 @@ dependencies = [
     "tqdm>=4.67",
 ]
 
+[project.optional-dependencies]
+dev  = ["pytest>=7", "pytest-cov"]
+docs = ["sphinx>=7", "furo", "nbsphinx", "sphinx-copybutton",
+        "sphinx-autodoc-typehints", "ipykernel"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["optional: mark test as optional (skipped when dep missing)"]
+
 [project.scripts]
 fd-sample = "foregrounds_diffusion.sample:main"
 

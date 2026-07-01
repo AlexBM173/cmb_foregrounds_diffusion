@@ -48,6 +48,22 @@ The cluster action plan is the only remaining critical-path work. §3.4, §3.5,
 and §3.7 below contain the supporting code; this section is the operational
 checklist.
 
+> **⚠ BLOCKER — resolve before Step 2 (statistics).** The tutorial notebooks
+> disagree on normalisation (see inconsistency #7 in
+> `docs/paper_code_inconsistencies.md`). Notebook 03 z-scores **both** channels
+> and saves `..._zscore_...` files + `norm_params = [cib_mean, cib_std,
+> tsz_mean, tsz_std]`; notebook 06 loads legacy `..._minmax_..._zero`/`_norm`
+> filenames that 03 does not produce. On login, run
+> `ls data/low_pass/2mJy/*.npy` and confirm **which files actually exist** and
+> **which normalisation the checkpoint was trained with**. A z-score-trained
+> model must be denormalised with `denormalize_dm_maps` (`x·std+mean`, both
+> channels), never `renormalize_dm_maps`. Align the load filenames in notebooks
+> 06–14 to the real ones before trusting any figure's absolute amplitude.
+>
+> **Critical path = notebooks 06–09 run interactively (Step 2).** `eval.py`
+> (§3.10) and the SLURM array (§3.7) are *optional* convenience for multi-checkpoint
+> convergence plots and are **not** required for the core thesis figures.
+
 ### Step 0 — First things on login
 
 ```bash
@@ -1394,18 +1410,17 @@ accelerate launch foregrounds_diffusion/eval.py \
 
 ```python
 """Unified evaluation script: sample → statistics → NPZ output."""
-import argparse, numpy as np
+import argparse, numpy as np, torch
 from pathlib import Path
-from foregrounds_diffusion.sample import build_model, sample_batches
-from foregrounds_diffusion.preprocessing import (
-    apply_maxmin_normalization, apply_stdnorm,
-)
+from accelerate import Accelerator
+# NOTE: sample.py exposes build_model, load_checkpoint, and sample(diffusion,
+# accelerator, num_batches, batch_size) — there is no `sample_batches`.
+from foregrounds_diffusion.sample import build_model, load_checkpoint, sample
+from foregrounds_diffusion.preprocessing import denormalize_dm_maps
 from foregrounds_diffusion.flatmaps import make_gaussian_realisation
-from foregrounds_diffusion.moments import mean_cls, compute_cross_moments
+from foregrounds_diffusion.moments import mean_cls, mean_cross_cls, compute_cross_moments
 from foregrounds_diffusion.morphology import compute_minkowski_tensors
-from foregrounds_diffusion.stacking import select_snr_pixels, extract_cutouts
 from foregrounds_diffusion.peak_counts import compute_peak_minima_counts
-from foregrounds_diffusion.masking import get_peak_masks, inpaint_masked_regions
 
 FLATSKYMAPPARAMS = [256, 256, 1.40625, 1.40625]
 BP_EDGES = [(100, 500), (500, 1000), (1000, 2000), (2000, 4000), (4000, 7000)]
@@ -1446,9 +1461,9 @@ def run_statistics(cib, tsz, mapparams, bp_edges, n_jobs):
     _,  cl_tsz, cl_tsz_std = mean_cls(
         tsz, mapparams, lmin=100, lmax=7000, binsize=200
     )
-    _, cl_cross, cl_cross_std = mean_cls(
-        cib, mapparams, lmin=100, lmax=7000, binsize=200,
-        flatskymap2=tsz
+    # Cross-spectrum: use mean_cross_cls (mean_cls has NO flatskymap2 arg)
+    _, cl_cross, cl_cross_std = mean_cross_cls(
+        cib, tsz, mapparams, lmin=100, lmax=7000, binsize=200
     )
 
     # Cross-moments (12 combinations)
@@ -1482,26 +1497,35 @@ def main():
     args = parse_args()
 
     # ---- 1. Load AGORA patches and denormalise ----
-    norm = np.load(args.norm_params, allow_pickle=True).item()
+    # norm_params_2mJy.npy is a plain ndarray [cib_mean, cib_std, tsz_mean, tsz_std]
+    # written by notebook 03 (BOTH channels z-scored) — NOT a dict, no .item().
+    # See inconsistency #7 in docs/paper_code_inconsistencies.md: confirm on the
+    # cluster that the checkpoint was z-score-trained before trusting this.
+    cib_mean, cib_std, tsz_mean, tsz_std = np.load(args.norm_params)
     agora_cib_raw = np.load(args.agora_cib)  # (N, H, W) or (N, H, W, 1)
     agora_tsz_raw = np.load(args.agora_tsz)
     if agora_cib_raw.ndim == 4:
         agora_cib_raw = agora_cib_raw[..., 0]
         agora_tsz_raw = agora_tsz_raw[..., 0]
     n = min(args.n_samples, len(agora_cib_raw))
-    agora_cib = agora_cib_raw[:n] * (norm['cib_max'] - norm['cib_min']) + norm['cib_min']
-    agora_tsz = agora_tsz_raw[:n] * norm['tsz_std'] + norm['tsz_mean']
+    # z-score inverse (x * std + mean) for both channels
+    agora_cib = agora_cib_raw[:n] * cib_std + cib_mean
+    agora_tsz = agora_tsz_raw[:n] * tsz_std + tsz_mean
 
     # ---- 2. Generate DDPM samples ----
-    model = build_model(channels=2, sampling_timesteps=args.sampling_timesteps)
-    import torch
-    ckpt = torch.load(args.checkpoint, map_location='cpu')
-    model.load_state_dict(ckpt['model'])
-    model.eval()
+    # sample() requires an Accelerator and gathers across GPUs; total returned
+    # per call = num_batches * batch_size * num_processes.
+    accelerator = Accelerator(split_batches=True, mixed_precision="fp16")
+    diffusion = build_model(channels=2, sampling_timesteps=args.sampling_timesteps)
+    diffusion = diffusion.to(accelerator.device)
+    diffusion = load_checkpoint(diffusion, args.checkpoint, accelerator)
     n_batches = (args.n_samples + args.batch_size - 1) // args.batch_size
-    samples = sample_batches(model, n_batches, args.batch_size)  # (N,2,H,W)
-    ddpm_cib = samples[:n, 0] * (norm['cib_max'] - norm['cib_min']) + norm['cib_min']
-    ddpm_tsz = samples[:n, 1] * norm['tsz_std'] + norm['tsz_mean']
+    samples = sample(diffusion, accelerator, num_batches=n_batches,
+                     batch_size=args.batch_size)          # (N, 2, H, W), z-score space
+    # Denormalise both channels with the z-score inverse (see #7)
+    samples = denormalize_dm_maps(samples[:n], cib_mean, cib_std, tsz_mean, tsz_std)
+    ddpm_cib = samples[:, 0]
+    ddpm_tsz = samples[:, 1]
 
     # ---- 3. Gaussian baseline ----
     el_agora, cl_agora_cib, _ = mean_cls(agora_cib, FLATSKYMAPPARAMS, 100, 7000, 200)
@@ -1544,13 +1568,18 @@ if __name__ == '__main__':
 ```
 
 **Key notes for implementation:**
-- `sample_batches` should be extracted from `sample.py` as a reusable
-  function that accepts a model and returns `(N, 2, H, W)` numpy array.
-  Currently `sample.py` is a script; refactor its inner loop into a function
-  importable by `eval.py`.
-- The `norm_params` NPZ must contain `cib_min`, `cib_max`, `tsz_mean`,
-  `tsz_std` — check the exact keys in `data/low_pass/2mJy/norm_params_2mJy.npy`
-  before writing the denormalisation code.
+- `sample.py` already exposes reusable `build_model`, `load_checkpoint`, and
+  `sample(diffusion, accelerator, num_batches, batch_size)` — `eval.py` imports
+  these directly. Because `sample()` gathers across GPUs, the number of samples
+  returned per call is `num_batches × batch_size × num_processes`; size
+  `--n-samples` and `--batches` accordingly, and run under `accelerate launch`.
+- `norm_params_2mJy.npy` is a plain `np.ndarray` of shape `(4,)` ordered
+  `[cib_mean, cib_std, tsz_mean, tsz_std]` (notebook 03). Load with positional
+  unpacking — **no `.item()`, no dict keys**. **Before trusting amplitudes,
+  resolve inconsistency #7**: confirm the checkpoint's training normalisation
+  and that the `_zscore_` files (not the legacy `_minmax_` names in notebook 06)
+  are the ones on disk. A z-score-trained model must be denormalised with
+  `denormalize_dm_maps`, never the min-max `renormalize_dm_maps`.
 - Minkowski functionals (`compute_mfs`) require `quantimpy` which may not
   be installed on the cluster — wrap in a `try/except ImportError` and skip
   if not available; log a warning.

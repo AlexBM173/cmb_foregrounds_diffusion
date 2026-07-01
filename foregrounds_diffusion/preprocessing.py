@@ -139,7 +139,8 @@ def load_all_moments(filename, bandpass_centers, max_lines=-1):
         Dictionary keyed ``"moment_00"`` … ``"moment_11"``, each value being
         a list of normalised moment arrays.
     """
-    moments_data = np.load(filename)[:max_lines]
+    _raw = np.load(filename)
+    moments_data = _raw if max_lines == -1 else _raw[:max_lines]
     norms = [
         bandpass_centers,  # S2aa
         bandpass_centers,  # S2bb

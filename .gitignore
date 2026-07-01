@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+*.prof
+dist/
+build/
+.eggs/
+*.so
+*.pyd
+"Learning Correlated Astrophysical Foregrounds with Denoising Diffusion Probabilistic Models.pdf"

@@ -8,4 +8,14 @@ build/
 .eggs/
 *.so
 *.pyd
-"Learning Correlated Astrophysical Foregrounds with Denoising Diffusion Probabilistic Models.pdf"
+# PDFs and Windows Zone.Identifier metadata
+*.pdf
+*.pdf:Zone.Identifier
+*.fits:Zone.Identifier
+# Nested git repos (used locally; not submodules)
+scattering_transform/
+# Generated plot outputs
+plots/paper/*.pdf
+plots/paper/*.png
+plots/benchmarks/*.pdf
+plots/benchmarks/*.png

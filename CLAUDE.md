@@ -30,6 +30,13 @@ accelerate launch foregrounds_diffusion/sample.py \
   --checkpoint results/my_run_v1/model-20.pt \
   --batches 10 --batch-size 16 \
   --output data/low_pass/2mJy/samples.npy --wandb
+
+# Fast DDIM sampling (250 steps instead of 1000, ~4× faster, no retraining needed)
+accelerate launch foregrounds_diffusion/sample.py \
+  --checkpoint results/my_run_v1/model-20.pt \
+  --batches 10 --batch-size 16 \
+  --output data/low_pass/2mJy/samples_ddim250.npy \
+  --sampling-timesteps 250
 ```
 
 ## SLURM (cluster)
@@ -85,7 +92,7 @@ The pipeline is:
 | `peak_counts.py` | Peak and minima counting statistics (Sabyr et al. 2024): `smooth_map`, `find_peaks`, `find_minima`, `count_peaks_binned`, `count_minima_binned`, `compute_peak_minima_counts`. numpy/scipy only. |
 | `scattering_stats.py` | Scattering transform statistics: `compute_scattering_coefficients` (S1, S2), `compute_scattering_covariance` (C11, Cheng et al. backend only), `scattering_summary`. Requires Cheng et al. repo or `kymatio`. |
 | `train.py` | Training entry point (not a library module — run via `accelerate launch`). CLI: `--run-name`, `--steps`, `--batch-size`, `--lr`, `--wandb` |
-| `sample.py` | Sampling entry point. CLI: `--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`, `--wandb` |
+| `sample.py` | Sampling entry point. CLI: `--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`, `--sampling-timesteps` (DDIM), `--wandb` |
 | `redundant/` | Old scripts kept for reference; not part of the active codebase |
 
 ### Key data conventions

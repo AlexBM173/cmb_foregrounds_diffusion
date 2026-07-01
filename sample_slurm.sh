@@ -21,6 +21,7 @@ CHECKPOINT="results/run_v1/model-20.pt"   # path to trained checkpoint
 OUTPUT="data/low_pass/2mJy/samples.npy"   # output .npy file
 BATCHES=10                                 # number of sampling batches
 BATCH_SIZE=16                              # samples per batch (per GPU)
+SAMPLING_TIMESTEPS=""                      # leave empty for full DDPM (1000 steps); set e.g. 250 for DDIM
 USE_WANDB=false                            # set to true to enable WandB logging
 
 # ---------------------------------------------------------------------------
@@ -29,6 +30,7 @@ echo "================================================"
 echo "Checkpoint: ${CHECKPOINT}"
 echo "Output    : ${OUTPUT}"
 echo "Samples   : $((BATCHES * BATCH_SIZE * 4)) (${BATCHES} batches × ${BATCH_SIZE} × 4 GPUs)"
+echo "Timesteps : ${SAMPLING_TIMESTEPS:-1000 (DDPM)}"
 echo "WandB     : ${USE_WANDB}"
 echo "SLURM job : ${SLURM_JOB_ID}"
 echo "Started   : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -47,10 +49,16 @@ if [ "${USE_WANDB}" = "true" ]; then
     WANDB_FLAG="--wandb"
 fi
 
+DDIM_FLAG=""
+if [ -n "${SAMPLING_TIMESTEPS}" ]; then
+    DDIM_FLAG="--sampling-timesteps ${SAMPLING_TIMESTEPS}"
+fi
+
 accelerate launch --multi_gpu --num_processes 4 \
     ~/cmb_foregrounds_diffusion/foregrounds_diffusion/sample.py \
     --checkpoint "${CHECKPOINT}" \
     --batches "${BATCHES}" \
     --batch-size "${BATCH_SIZE}" \
     --output "${OUTPUT}" \
+    ${DDIM_FLAG} \
     ${WANDB_FLAG}

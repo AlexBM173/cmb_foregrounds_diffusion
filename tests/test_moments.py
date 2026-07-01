@@ -129,3 +129,64 @@ def test_compute_cross_moments_parallel_matches_serial(patch_stack, bp_filters):
     p_out, p_labels = compute_cross_moments(patch_stack, patch_stack, bp_filters, n_jobs=2)
     np.testing.assert_allclose(s_out, p_out, rtol=1e-10)
     assert s_labels == p_labels
+
+
+# ---------------------------------------------------------------------------
+# Cross-moment correctness with DISTINCT channels.
+#
+# The tests above pass the same array as both CIB and tSZ, so S2aa == S2bb ==
+# S2ab and S3aab == S3abb identically — a channel swap or a wrong cross-term
+# exponent (e.g. a**2 * b coded as a * b**2) would pass silently.  The two
+# tests below use genuinely distinct a and b to close that gap.
+# ---------------------------------------------------------------------------
+
+
+def _skewed_field(flatskymapparams, seed):
+    """Non-Gaussian field with nonzero odd moments (chi-square-like)."""
+    nx, ny = flatskymapparams[0], flatskymapparams[1]
+    rng = np.random.default_rng(seed)
+    return rng.standard_normal((nx, ny)) ** 2
+
+
+def test_cross_moments_scaled_channel_ratios(flatskymapparams, bp_filters):
+    # b = 2a exactly.  bandpass_filter is linear, so b_filtered = 2 a_filtered,
+    # giving each of the 12 moments an exact, DISTINCT ratio to its a-only
+    # counterpart.  Any channel swap or wrong cross-term exponent breaks one.
+    a = _skewed_field(flatskymapparams, 100)
+    cib = a[None]
+    tsz = 2.0 * a[None]
+    out, labels = compute_cross_moments(cib, tsz, bp_filters)
+    m = {lab: out[0, :, i] for i, lab in enumerate(labels)}
+
+    np.testing.assert_allclose(m["S2bb"], 4 * m["S2aa"], rtol=1e-6)
+    np.testing.assert_allclose(m["S2ab"], 2 * m["S2aa"], rtol=1e-6)
+    np.testing.assert_allclose(m["S3bbb"], 8 * m["S3aaa"], rtol=1e-6)
+    np.testing.assert_allclose(m["S3aab"], 2 * m["S3aaa"], rtol=1e-6)
+    np.testing.assert_allclose(m["S3abb"], 4 * m["S3aaa"], rtol=1e-6)
+    np.testing.assert_allclose(m["S4bbbb"], 16 * m["S4aaaa"], rtol=1e-6)
+    np.testing.assert_allclose(m["S4aaab"], 2 * m["S4aaaa"], rtol=1e-6)
+    np.testing.assert_allclose(m["S4aabb"], 4 * m["S4aaaa"], rtol=1e-6)
+    np.testing.assert_allclose(m["S4abbb"], 8 * m["S4aaaa"], rtol=1e-6)
+    # non-triviality: the a-only odd moment must be genuinely nonzero
+    assert np.max(np.abs(m["S3aaa"])) > 0
+
+
+def test_cross_moments_analytic_values(flatskymapparams, bp_filters):
+    # Pin the exact definition of each moment against a direct numpy
+    # computation on two INDEPENDENT distinct fields (so a**2*b != a*b**2).
+    from foregrounds_diffusion.flatmaps import bandpass_filter
+
+    a = _skewed_field(flatskymapparams, 1)
+    b = _skewed_field(flatskymapparams, 2)
+    out, labels = compute_cross_moments(a[None], b[None], bp_filters)
+    m = {lab: out[0, :, i] for i, lab in enumerate(labels)}
+    for j, bp in enumerate(bp_filters):
+        af = bandpass_filter(a, bp)
+        bf = bandpass_filter(b, bp)
+        np.testing.assert_allclose(m["S2aa"][j], np.mean(af**2), rtol=1e-6)
+        np.testing.assert_allclose(m["S2bb"][j], np.mean(bf**2), rtol=1e-6)
+        np.testing.assert_allclose(m["S2ab"][j], np.mean(af * bf), rtol=1e-6)
+        np.testing.assert_allclose(m["S3aab"][j], np.mean(af**2 * bf), rtol=1e-6)
+        np.testing.assert_allclose(m["S3abb"][j], np.mean(af * bf**2), rtol=1e-6)
+        np.testing.assert_allclose(m["S4aabb"][j], np.mean(af**2 * bf**2), rtol=1e-6)
+        np.testing.assert_allclose(m["S4abbb"][j], np.mean(af * bf**3), rtol=1e-6)

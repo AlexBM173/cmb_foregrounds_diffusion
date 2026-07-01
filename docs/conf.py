@@ -16,13 +16,18 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.mathjax",
+    "sphinx_rtd_theme",
     "nbsphinx",
     "sphinx_copybutton",
     "sphinx_autodoc_typehints",
 ]
 
-html_theme = "furo"
+html_theme = "sphinx_rtd_theme"
 html_title = "foregrounds-diffusion"
+html_theme_options = {
+    "navigation_depth": 2,
+    "collapse_navigation": False,
+}
 
 # Mock heavy optional packages so autodoc does not error on RTD.
 autodoc_mock_imports = [

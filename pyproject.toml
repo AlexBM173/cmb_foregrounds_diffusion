@@ -46,7 +46,7 @@ Repository    = "https://github.com/AlexBM173/cmb_foregrounds_diffusion"
 
 [project.optional-dependencies]
 dev  = ["pytest>=7", "pytest-cov", "joblib>=1.3"]
-docs = ["sphinx>=7,<8", "furo", "nbsphinx", "sphinx-copybutton",
+docs = ["sphinx>=7,<8", "sphinx-rtd-theme", "nbsphinx", "sphinx-copybutton",
         "sphinx-autodoc-typehints", "ipykernel"]
 fast = ["numba>=0.60", "quantimpy>=0.5.6"]
 

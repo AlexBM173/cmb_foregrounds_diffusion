@@ -19,14 +19,17 @@ because the cluster is down. Phases 1–6 are all in scope.
 
 | Phase / section | Status |
 |---|---|
-| §1 Full unit + integration test suite | ✅ Complete (125 tests) |
+| §1 Full unit + integration test suite | ✅ Complete (125 tests, 11 benchmarks) |
 | §2.1–2.3 Profiling baseline sweeps | ✅ Complete |
 | §2.4 Benchmark notebook | ✅ Complete |
+| §2.6a Numba JIT | ✅ Skipped — scipy owns 67% of cost, accumulation < 3% |
 | §2.6b–c NumPy vectorisation + ℓ-bin precompute | ✅ Complete |
 | §3.2 `n_jobs` on two bottleneck functions | ✅ Complete |
-| §6.1–6.4 CI foundation (tests.yml + lint.yml) | Next |
-| §2.6a Numba JIT | Pending profiling confirmation |
-| §3.3 GPU port `map2cl_torch` | To do |
+| §3.3 GPU port `map2cl_torch` | ✅ Complete |
+| §6.1–6.4 CI foundation (tests.yml + lint.yml) | ✅ Complete |
+| §7 Codebase cleanup (redundant files + old notebooks) | Next |
+| §8 Publication-quality plots | Next |
+| §3.2 `n_jobs` on remaining functions + scaling plots | To do |
 | §3.4–3.5 Multi-GPU + MPI evaluation | To do (cluster dependent) |
 | §3.7 SLURM array eval jobs | To do |
 | §4 Documentation + ReadTheDocs | To do |
@@ -1585,21 +1588,261 @@ Catches lint errors locally before they reach CI, keeping the feedback loop tigh
 
 ---
 
+## Phase 7 — Codebase Cleanup
+
+Remove legacy code that predates the current package structure. Each file must be
+reviewed for salvageable content before deletion — the review findings are recorded
+here so the rationale is preserved in git history.
+
+---
+
+### 7.1 Redundant Python scripts (`foregrounds_diffusion/redundant/`)
+
+| File | What it contains | Disposition |
+|---|---|---|
+| `ds_utils.py` | `apply_stdnorm` (superseded by `preprocessing.py`), `stats` (superseded by `statistics.py`), `renormalize_dm_maps` (post-sampling rescaling logic) | Review `renormalize_dm_maps` — if the rescaling formula is not documented elsewhere, extract a note to `docs/paper_code_inconsistencies.md` before deleting |
+| `flatsky.py` | Early flat-sky FFT utilities (`get_lxly`, `cl_to_cl2d`, `make_gaussian_realisation`, etc.) superseded by `flatmaps.py` | Delete — all functions are present in `flatmaps.py` with improved implementations |
+| `gen_masks_from_maps.py` | Early Gaussian fitting and mask generation; uses bare `from numpy import *` style; superseded by `masking.py` and `statistics.py` | Delete — no logic absent from the current modules |
+| `ps_utils.py` | `apply_maxmin_normalization` (in `preprocessing.py`), `load_all_moments` (loads saved moments NPZ by bandpass centre) | Check whether `load_all_moments` is called anywhere in active notebooks; if not, delete — the function encodes a specific NPZ layout that may have changed |
+| `sample.py` | Old sampling script using `channels=3` and `Trainer1D`; model architecture is incompatible with current checkpoints | Delete — superseded by `foregrounds_diffusion/sample.py` |
+
+**Deletion process (per file):**
+1. `grep -r "<filename>" . --include="*.py" --include="*.ipynb"` — confirm no active import
+2. Read through for any non-obvious logic not present in the current codebase
+3. Delete the file; commit with message `chore: remove redundant/<file> — superseded by <module>`
+
+Once all files are removed, delete the `redundant/` directory and remove its
+exclusions from `[tool.ruff]` and `[tool.mypy]` in `pyproject.toml`.
+
+---
+
+### 7.2 Old notebooks in `docs/` (outside `docs/tutorials/`)
+
+These predate the tutorial series and were used during initial development. Review
+each for content worth preserving in the tutorials or docs before deleting.
+
+| Notebook | Contents | Disposition |
+|---|---|---|
+| `docs/00_model.ipynb` | Early model loading and data inspection at the start of the project | Delete — covered by tutorials 04 and 05 |
+| `docs/01_map_cuts.ipynb` | Raw preprocessing pipeline from cluster FITS files; uses old `ds_utils`/`ps_utils` imports | **Review** — may contain preprocessing parameters (NSIDE, step size, frequency channels) not fully captured in `preprocessing.ipynb`; extract any new details to `docs/paper_code_inconsistencies.md`, then delete |
+| `docs/02_visualization-joint.ipynb` | Visualisation of joint CIB+tSZ maps and 2D power spectra | Delete — superseded by tutorials 05 and 06 |
+| `docs/03_compute_moments-joint.ipynb` | Moment statistics on joint maps; old import style | Delete — superseded by tutorial 07 |
+| `docs/03_compute_moments-sum.ipynb` | Summed moment statistics; uses `scienceplots` style | **Review** — uses `scienceplots` and may have the cleanest version of the summed-moments plot layout; extract plot style to §8 before deleting |
+| `docs/05_plots.ipynb` | **Paper figure generation notebook**: Figures 1–end of the Prabhu et al. paper, using real FITS data and trained model outputs | **Do not delete** — move to `docs/tutorials/` as `14_paper_figures.ipynb` and rewrite to use the `foregrounds_diffusion` package API instead of raw `ds_utils`/`ps_utils`; apply §8 plot standards |
+| `docs/scratch.ipynb` | Ad-hoc exploratory cells; no coherent structure | Delete — no salvageable content |
+| `docs/stack_tsz_based_on_snr.ipynb` | tSZ stacking analysis by SNR bin, comparing AGORA and DDPM outputs | **Review** — may contain the authoritative stacking parameter choices (SNR bins, cutout sizes); confirm these are documented in tutorial 09 before deleting |
+| `docs/tutorials/masking.ipynb` | Stray notebook that does not follow the tutorial numbering; applies masking to real HEALPix maps | **Review** — check whether it covers content absent from tutorial 02; if so, merge relevant cells into tutorial 02, then delete |
+
+**Priority order:** review `docs/05_plots.ipynb` first (migrate to tutorial 14); then
+`01_map_cuts.ipynb`, `stack_tsz_based_on_snr.ipynb`, `03_compute_moments-sum.ipynb`,
+`tutorials/masking.ipynb`; then delete the rest.
+
+---
+
+### 7.3 Tutorial numbering after cleanup
+
+After `docs/05_plots.ipynb` is migrated:
+
+```
+docs/tutorials/
+  01_halo_catalogue.ipynb
+  02_masking.ipynb
+  03_patch_extraction.ipynb
+  04_model_and_training.ipynb
+  05_sampling.ipynb
+  06_power_spectra.ipynb
+  07_higher_order_stats.ipynb
+  08_morphology_and_histograms.ipynb
+  09_tsz_stacking.ipynb
+  10_peak_minima_counts.ipynb
+  11_scattering_transforms.ipynb
+  12_minkowski_tensors.ipynb
+  13_benchmarks.ipynb
+  14_paper_figures.ipynb   ← migrated from docs/05_plots.ipynb
+```
+
+Update `docs/notebook_summaries.md` after each migration/deletion.
+
+---
+
+## Phase 8 — Publication-Quality Plots
+
+All figures used in the thesis or paper must meet journal submission standards:
+vector-format primary output, colourblind-safe palette, accessible font sizes,
+and no `pylab`/`from pylab import *` anti-patterns.
+
+---
+
+### 8.1 Matplotlib style baseline
+
+Create `foregrounds_diffusion/plot_style.py` (not a public API module — imported
+only inside notebooks) with a single `apply()` call that sets rcParams once:
+
+```python
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+
+# Wong (2011) 8-colour palette — the standard colorblind-safe set.
+# Distinguishable under deuteranopia, protanopia, and tritanopia.
+WONG = [
+    "#000000",  # black
+    "#E69F00",  # orange
+    "#56B4E9",  # sky blue
+    "#009E73",  # bluish green
+    "#F0E442",  # yellow
+    "#0072B2",  # blue
+    "#D55E00",  # vermillion
+    "#CC79A7",  # reddish purple
+]
+
+def apply(fig_width_pt=246.0, n_cols=1):
+    """Set rcParams for publication-quality figures.
+
+    Parameters
+    ----------
+    fig_width_pt : float
+        Journal text width in points (246 pt ≈ MNRAS single column;
+        510 pt ≈ MNRAS double column).  Pass the LaTeX \\textwidth.
+    n_cols : int
+        Number of figure columns (1 or 2).  Width is divided accordingly.
+    """
+    inches_per_pt = 1.0 / 72.27
+    fig_width = fig_width_pt * inches_per_pt * n_cols
+    golden = (1 + 5**0.5) / 2  # golden ratio for default height
+
+    mpl.rcParams.update({
+        # --- Figure size and DPI ---
+        "figure.figsize":       (fig_width, fig_width / golden),
+        "figure.dpi":           150,        # screen preview
+        "savefig.dpi":          300,        # raster output
+        "savefig.bbox":         "tight",
+        "savefig.pad_inches":   0.05,
+
+        # --- Fonts (match LaTeX body font) ---
+        "font.family":          "serif",
+        "font.serif":           ["Computer Modern Roman", "DejaVu Serif"],
+        "text.usetex":          False,      # True if LaTeX is installed locally
+        "mathtext.fontset":     "cm",
+        "font.size":            9,
+        "axes.titlesize":       9,
+        "axes.labelsize":       9,
+        "xtick.labelsize":      8,
+        "ytick.labelsize":      8,
+        "legend.fontsize":      8,
+
+        # --- Lines and markers ---
+        "lines.linewidth":      1.2,
+        "lines.markersize":     4,
+        "axes.linewidth":       0.8,
+        "xtick.major.width":    0.8,
+        "ytick.major.width":    0.8,
+        "xtick.minor.width":    0.6,
+        "ytick.minor.width":    0.6,
+        "xtick.direction":      "in",
+        "ytick.direction":      "in",
+        "xtick.top":            True,
+        "ytick.right":          True,
+
+        # --- Colour cycle ---
+        "axes.prop_cycle":      mpl.cycler(color=WONG),
+
+        # --- Legend ---
+        "legend.frameon":       False,
+        "legend.handlelength":  1.5,
+
+        # --- Layout ---
+        "figure.constrained_layout.use": True,
+    })
+    return WONG
+```
+
+Usage in every notebook that produces paper figures:
+```python
+from foregrounds_diffusion.plot_style import apply, WONG
+apply(fig_width_pt=246.0)          # MNRAS single column
+# or
+apply(fig_width_pt=510.0, n_cols=2)  # MNRAS double column spanning both cols
+```
+
+---
+
+### 8.2 Colourmap choices
+
+| Use case | Recommended cmap | Avoid |
+|---|---|---|
+| CIB intensity map | `"cividis"` (perceptually uniform, colorblind-safe) | `"Blues"`, `"inferno"` |
+| tSZ Compton-y map | `"RdBu_r"` centred at zero (diverging, colourblind-safe) | `"hot_r"` |
+| Power spectrum / residuals | `"viridis"` | `"jet"`, `"rainbow"` |
+| Binary masks / excursion sets | Black/white only | any colour |
+| Correlation matrix / covariance | `"coolwarm"` or `"PuOr"` (diverging) | `"seismic"` |
+
+For HEALPix mollview projections, `healpy` uses its own cmap argument — pass
+`cmap="cividis"` explicitly rather than accepting the default `"gray"` or `"viridis"`.
+
+---
+
+### 8.3 Save format convention
+
+```python
+fig.savefig("plots/paper/fig01_cib_fullsky.pdf")   # primary: vector for LaTeX
+fig.savefig("plots/paper/fig01_cib_fullsky.png", dpi=300)  # backup: raster
+```
+
+- PDF is the submission format for most journals (MNRAS, A&A, ApJ).
+- PNG at 300 dpi is required if the figure contains rasterised content (imshow,
+  healpy maps) that does not render well as vector.
+- Never commit SVG to the repo (large file sizes; git history bloat).
+- All paper figures go under `plots/paper/`; benchmark figures under `plots/benchmarks/`.
+- Add `plots/paper/*.png` and `plots/paper/*.pdf` to `.gitignore` — generated files
+  should not be committed; the notebooks that generate them are the source of truth.
+
+---
+
+### 8.4 Figures to rewrite
+
+These are the figures in `docs/05_plots.ipynb` (to become tutorial 14) that need
+to be ported to the new style:
+
+| Figure | Current issues | Required fixes |
+|---|---|---|
+| Fig 1 — CIB full-sky mollview | `cmap='Blues'`; no DPI; font sizes hardcoded | Switch to `cmap='cividis'`; apply §8.1 rcParams; save as PDF+PNG |
+| Fig 2 — Processed patch example | `cmap='Blues'`; `from pylab import *` | Same cmap fix; remove pylab; use `fig, ax = plt.subplots()` |
+| Multifrequency map panel | `cmap='inferno'`; ad-hoc font sizes | Switch to `cmap='cividis'`; use `apply()` |
+| CIB/tSZ side-by-side panel | Non-standard cmaps; `cmap='hot_r'` for tSZ | CIB → `cividis`; tSZ → `RdBu_r` centred at zero |
+| Power spectrum comparison | `colors = {'CIB': 'royalblue', 'tSZ': 'orangered'}` — not from WONG | Replace with `WONG[5]` (blue), `WONG[6]` (vermillion) |
+| Moments comparison plots | `from pylab import *`; hardcoded `fsval` | Apply `apply()` once at top of notebook; remove all explicit `fontsize=` overrides |
+| Minkowski functionals | Inconsistent axis formatting | Apply `apply()` and `constrained_layout` |
+
+---
+
+### 8.5 Anti-patterns to remove from all notebooks
+
+- `from pylab import *` — pollutes namespace; replace with explicit `import matplotlib.pyplot as plt`
+- `rcParams.update({'font.size': 12})` scattered through cells — consolidate into single `apply()` call
+- `plt.figure(figsize=(W, H))` with hardcoded inches — replace with `fig_width_pt` formula in `apply()`
+- `#plt.savefig(...)` (commented-out saves) — uncomment or delete; never leave dead save calls
+- `clf()` and bare `figure()` calls (pylab relics) — replace with `fig, ax = plt.subplots()`
+- `cmap='Blues'`, `cmap='hot_r'`, `cmap='inferno'` for intensity maps — replace per §8.2
+
+---
+
 ## Sequencing recommendation
 
 1. ✅ **Tests** — full unit + integration suite across all modules.
 2. ✅ **Baseline profiling** — §2.2 sweeps; Figures 1–4 in benchmark notebook.
 3. ✅ **Single-core optimisations** — §2.6b–c; Figures 5–9.
 4. ✅ **`n_jobs` parallelisation** — §3.2 on two bottleneck functions.
-5. **CI foundation** — `tests.yml` + `lint.yml` + branch protection. ← Next
-6. **Numba JIT** — §2.6a; only if profiling shows accumulation ≥ 30%.
-7. **GPU ports** — `map2cl_torch` with equivalence test (§3.3); Figure 14.
-8. **`n_jobs` on remaining functions + strong/weak scaling plots** — §3.2 full; Figures 11–12.
-9. **MPI wrapper + eval SLURM array job** — §3.5/3.7; Figure 13.
-10. **Multi-node training SLURM script** — DDP config (§3.6); validate on 2 nodes.
-11. **Docstring audit** — §4.1; prerequisite for Sphinx.
-12. **Sphinx + RTD skeleton** — §4.2–4.5; get a basic build passing.
-13. **`pyproject.toml` audit + TestPyPI** — §5.2–5.4; dry-run the publish workflow.
-14. **PyPI publish** — §5.5–5.6; tag `v0.1.0`; set up Trusted Publisher; release.
-15. **Cython** — §2.6g; only if Numba JIT is insufficient.
-16. **Additional CI items** — §6.5; dependency pinning, notebook smoke tests, `towncrier`.
+5. ✅ **CI foundation** — `tests.yml` + `lint.yml` (Node 24 actions).
+6. ✅ **Numba JIT** — §2.6a; skipped (accumulation < 3% of runtime).
+7. ✅ **GPU port** — `map2cl_torch` with equivalence test (§3.3).
+8. **Codebase cleanup** — §7; review then delete `redundant/` scripts and old `docs/` notebooks; migrate `05_plots.ipynb` to tutorial 14. ← Next
+9. **Publication-quality plots** — §8; create `plot_style.py`; rewrite all paper figures in tutorial 14 to use Wong palette, correct cmaps, PDF+PNG output.
+10. **`n_jobs` on remaining functions + strong/weak scaling plots** — §3.2 full; Figures 11–12.
+11. **MPI wrapper + eval SLURM array job** — §3.5/3.7; Figure 13.
+12. **Multi-node training SLURM script** — DDP config (§3.6); validate on 2 nodes.
+13. **Docstring audit** — §4.1; prerequisite for Sphinx.
+14. **Sphinx + RTD skeleton** — §4.2–4.5; get a basic build passing.
+15. **`pyproject.toml` audit + TestPyPI** — §5.2–5.4; dry-run the publish workflow.
+16. **PyPI publish** — §5.5–5.6; tag `v0.1.0`; set up Trusted Publisher; release.
+17. **Cython** — §2.6g; only if Numba JIT is insufficient.
+18. **Additional CI items** — §6.5; dependency pinning, notebook smoke tests, `towncrier`.

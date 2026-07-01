@@ -1,3 +1,26 @@
+"""2D Gaussian fitting and summary statistics for flat-sky maps.
+
+This module provides two distinct capabilities:
+
+2D Gaussian fitting
+-------------------
+Used to characterise the angular resolution of beam-convolved or filtered
+maps by fitting a 2D Gaussian to the stacked profile of point sources or
+the central peak of a two-point correlation function.
+
+:func:`gaussian` — parameterised 2D Gaussian (height, centre, widths, angle).
+:func:`moments` — estimate Gaussian parameters from image moments.
+:func:`fitgaussian` — fit a 2D Gaussian to a 2D array via ``scipy.optimize``.
+:func:`fitting_func` — convenience wrapper that fits and optionally returns
+    the residual map; also enforces parameter bounds.
+
+Summary statistics
+------------------
+:func:`stats` — compute mean, standard deviation, minimum, and maximum of a
+    flat-sky map, optionally masking zero pixels.  Used for quick sanity
+    checks on patch statistics before and after normalisation.
+"""
+
 import numpy as np
 from scipy import optimize
 
@@ -71,6 +94,7 @@ def fitgaussian(data):
     params = moments(data)
 
     def errorfunction(p):
+        """Residual vector for least-squares Gaussian fitting."""
         return np.ravel(gaussian(*p)(*np.indices(data.shape)) - data)
 
     p, _ = optimize.leastsq(errorfunction, params)

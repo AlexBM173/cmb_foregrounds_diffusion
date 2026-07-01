@@ -1,3 +1,45 @@
+"""Data preprocessing utilities: normalisation, patch extraction, and filtering.
+
+This module covers everything between raw HEALPix FITS files and the
+training-ready ``.npy`` arrays consumed by :mod:`foregrounds_diffusion.train`.
+The full pipeline is documented in ``docs/tutorials/02_masking.ipynb`` and
+``docs/tutorials/03_patch_extraction.ipynb``.
+
+Normalisation
+-------------
+Two schemes are used, one per channel:
+
+- **CIB** (``apply_maxmin_normalization``): min–max scaled to [0, 1].
+  CIB intensities are non-negative by construction, so this is lossless.
+- **tSZ** (``apply_stdnorm``): z-score normalised to zero mean and unit
+  variance per channel across the full training set.
+
+The inverse operations are :func:`renormalize_dm_maps` (for post-sampling
+rescaling back to physical units) and :func:`denormalize_dm_maps` (for
+z-score inversion).
+
+Patch extraction
+----------------
+:class:`FlatCutter` projects HEALPix full-sky maps onto flat-sky patches
+using a gnomonic (tangent-plane) projection.  :func:`get_patch_centers`
+returns a grid of pointing centres that tiles the sky.
+
+Filtering
+---------
+:func:`get_lpf_hpf` builds low-pass, high-pass, or band-pass 2D filters in
+ℓ-space.  The training data uses a low-pass cut at ℓ = 7000 to avoid
+aliasing artefacts from the HEALPix pixel window function.
+
+:func:`wiener_filter` builds a Wiener filter given signal and noise spectra.
+
+Dataset splitting
+-----------------
+:func:`split_data_to_tensors` performs an 80/10/10 train/val/test split,
+transposes from channels-last ``(N, H, W, C)`` to channels-first
+``(N, C, H, W)``, and returns ``torch.Tensor`` objects ready for the
+``DataLoader``.
+"""
+
 import astropy.units as u
 import healpy as hp
 import numpy as np

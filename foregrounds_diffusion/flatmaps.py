@@ -1,3 +1,39 @@
+"""Flat-sky Fourier utilities for CMB map analysis.
+
+This module provides the core mathematical primitives used throughout the
+pipeline.  All functions operate on **flat-sky maps**: 2D NumPy arrays where
+each pixel represents a fixed angular area on the sky, parameterised by::
+
+    flatskymapparams = [nx, ny, dx, dy]   # dx, dy in arcminutes/pixel
+
+For the training patches used in this project: ``[256, 256, 1.40625, 1.40625]``
+(6° × 6° at 1.40625 arcmin/pixel).
+
+Functions
+---------
+Power spectrum estimation:
+    :func:`map2cl` — auto- or cross-power spectrum of one or two maps
+    :func:`mean_cls` — mean spectrum over a stack (see :mod:`moments`)
+    :func:`cl2map` — draw a single Gaussian realisation from a 1D C_ℓ
+    :func:`make_gaussian_realisation` — correlated two-field realisation
+
+GPU-accelerated:
+    :func:`build_lbin_idx_fft2` — precompute ℓ-bin indices for PyTorch
+    :func:`map2cl_torch` — batched power spectrum on GPU
+
+Filtering:
+    :func:`get_lpf_hpf` — low-pass, high-pass, or band-pass filter mask
+    :func:`bandpass_filter` — apply a 2D filter to a map
+
+Polarisation:
+    :func:`convert_eb_qu` — rotate between E/B and Q/U representations
+
+Utilities:
+    :func:`get_lxly` — 2D Fourier wavenumber grids
+    :func:`radial_profile` — azimuthally averaged radial profile
+    :func:`cl_to_cl2d` — interpolate 1D C_ℓ onto the 2D Fourier grid
+"""
+
 import numpy as np
 
 # ---------------------------------------------------------------------------

@@ -1,3 +1,27 @@
+"""tSZ cluster stacking utilities.
+
+Stacking is a signal-recovery technique that averages cutouts centred on
+known or candidate cluster positions, suppressing uncorrelated noise and
+revealing the mean tSZ profile of the underlying population.
+
+This module implements the stacking analysis from paper §4.2, which compares
+the stacked tSZ cluster profiles in AGORA maps against DDPM samples to test
+whether the model reproduces the spatial structure of galaxy clusters.
+
+Workflow
+--------
+1. :func:`select_snr_pixels` identifies local SNR peaks in the tSZ maps
+   within a chosen SNR bin (e.g. 3–5 or 5–∞), returning ``(patch_idx, row,
+   col)`` coordinates.
+2. :func:`extract_cutouts` extracts square thumbnails of a given size centred
+   on each peak coordinate.
+3. The returned cutout stack is averaged by the caller to produce a stacked
+   profile image.
+
+See tutorial ``docs/tutorials/09_tsz_stacking.ipynb`` for the full analysis,
+including stacked-profile comparisons across SNR bins.
+"""
+
 import numpy as np
 
 # ---------------------------------------------------------------------------

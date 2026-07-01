@@ -1,3 +1,41 @@
+"""Morphological statistics: Minkowski functionals and Minkowski tensors.
+
+This module computes two families of morphological statistics on excursion
+sets — the subsets of pixels above a given intensity threshold ν.
+
+Minkowski Functionals
+---------------------
+The three scalar Minkowski functionals characterise the topology of excursion
+sets (paper §4.1, Figure 6):
+
+- **M0** (area fraction): fraction of pixels above threshold ν.
+- **M1** (perimeter): total boundary length normalised by map area.
+- **M2** (Euler characteristic): number of connected components minus number
+  of holes, measuring the connectivity of the excursion set.
+
+Computed by :func:`compute_mfs` using the ``quantimpy`` library
+(Boelens & Tchelepi 2021).  Requires ``pip install quantimpy``.
+
+Minkowski Tensors
+-----------------
+Rank-2 tensorial generalisations of the functionals that additionally encode
+the *anisotropy* and *orientation* of morphological features.
+:func:`compute_minkowski_tensors` returns the anisotropy index
+β = λ_min / λ_max ∈ [0, 1] (β = 1 is perfectly isotropic) and the
+major-axis orientation θ per map per threshold, for three tensor types:
+
+- **W012**: boundary normal tensor via Sobel-estimated outward normals n⊗n.
+  Probes isotropy of cluster boundary shapes.  Recommended default.
+- **W200**: area inertia tensor r⊗r over interior pixels.
+  Measures elongation of filled excursion regions.
+- **W201**: boundary position tensor r⊗r over boundary pixels.
+
+See tutorial ``docs/tutorials/12_minkowski_tensors.ipynb`` for β(ν) curves
+and polar orientation histograms comparing AGORA and DDPM maps.
+
+Reference: Schroder-Turk et al. (2013), *New J. Phys.* 15 083028.
+"""
+
 import numpy as np
 from scipy.ndimage import binary_erosion, sobel
 

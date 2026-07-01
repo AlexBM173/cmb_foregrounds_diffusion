@@ -1,3 +1,39 @@
+"""Power-spectrum and higher-order moment statistics.
+
+This module computes the summary statistics used to validate DDPM samples
+against the AGORA training maps (paper §4.1 and §4.2).  All functions
+accept stacks of flat-sky maps and return statistics averaged over the
+ensemble, making them suitable for comparing large sets of DDPM samples.
+
+Power spectra
+-------------
+:func:`mean_cls` — mean auto-power spectrum C_ℓ over N maps.
+:func:`mean_cross_cls` — mean cross-power spectrum between two map stacks.
+
+Both functions accept ``n_jobs=-1`` to parallelise over maps using joblib,
+and share a pre-computed ℓ-bin cache to amortise the FFT grid construction.
+
+Higher-order moments
+--------------------
+:func:`compute_summed_moments` — variance (S2), skewness (S3), and excess
+kurtosis (S4) of the bandpass-filtered sum field CIB + tSZ.  Equivalent to
+the collapsed bispectrum and trispectrum proxies used in the paper.
+
+:func:`compute_cross_moments` — the full set of 12 cross-moments between
+bandpass-filtered CIB (a) and tSZ (b) fields::
+
+    S2^{aa}, S2^{bb}, S2^{ab},
+    S3^{aaa}, S3^{bbb}, S3^{aab}, S3^{abb},
+    S4^{aaaa}, S4^{bbbb}, S4^{aaab}, S4^{aabb}, S4^{abbb}
+
+These are computed per ℓ-band by applying 2D bandpass filters from
+:func:`~foregrounds_diffusion.flatmaps.get_lpf_hpf` before taking moments.
+The output shape is ``(N, n_bands, 12)`` where N is the number of maps.
+
+See tutorial ``docs/tutorials/07_higher_order_stats.ipynb`` for the full
+comparison between AGORA, DDPM samples, and a Gaussian baseline.
+"""
+
 import numpy as np
 
 from foregrounds_diffusion.flatmaps import _build_ell_bin_cache, bandpass_filter, map2cl

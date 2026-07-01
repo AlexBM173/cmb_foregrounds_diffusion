@@ -7,8 +7,8 @@ import sys
 sys.path.insert(0, os.path.abspath(".."))
 
 project = "foregrounds_diffusion"
-author = "Alex Blake Martin"
-copyright = "2025, Alex Blake Martin"
+author = "Alex Blake Martín"
+copyright = "2026, Alex Blake Martín"
 release = "0.1.0"
 
 extensions = [

@@ -328,7 +328,7 @@ If you use this code in your research, please cite:
 
 ```bibtex
 @thesis{BlakeMartin2026,
-  author    = {Alex Blake Martin},
+  author    = {Alex Blake Martín},
   title     = {Learning Correlated Astrophysical Foregrounds with Denoising Diffusion Probabilistic Models},
   year      = {2026},
   school    = {University of Cambridge},

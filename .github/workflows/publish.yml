@@ -4,6 +4,10 @@ on:
   push:
     tags: ["v*"]
 
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build distribution
@@ -15,9 +19,12 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: pip install build
+      - run: pip install build twine
 
       - run: python -m build
+
+      # Validate metadata and that the README renders on PyPI before uploading.
+      - run: twine check dist/*
 
       - uses: actions/upload-artifact@v4
         with:

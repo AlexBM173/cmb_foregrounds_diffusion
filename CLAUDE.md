@@ -109,10 +109,11 @@ The pipeline is:
 
 ### Remote data
 
-Raw AGORA maps live on the cluster at:
-```
-/sptlocal/analysis/ymap/sims/mdpl2/data/v0.7/bahamas80_scal1.000/mask_radio_cib_2.0mjy/
-```
+Raw AGORA maps are hosted on the **Globus** data transfer service:
+
+- **Collection:** AGORA Simulation Products
+- **Path:** `/AGORA/v0.7/bahamas80_scal1.000/mask_radio_cib_2.0mjy/`
+
 The `preprocessing.ipynb` notebook documents the full preprocessing pipeline from raw HEALPix maps to the training `.npy` arrays.
 
 ## Reference docs

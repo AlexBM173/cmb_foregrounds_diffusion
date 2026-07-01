@@ -29,7 +29,7 @@ because the cluster is down. Phases 1–6 are all in scope.
 | §6.1–6.4 CI foundation (tests.yml + lint.yml) | ✅ Complete |
 | §7 Codebase cleanup (redundant files + old notebooks) | ✅ Complete |
 | §9 Notebook variable naming consistency | ✅ Complete |
-| §8 Publication-quality plots | Next |
+| §8 Publication-quality plots | ✅ Complete |
 | §3.2 `n_jobs` on remaining functions + scaling plots | To do |
 | §3.4–3.5 Multi-GPU + MPI evaluation | To do (cluster dependent) |
 | §3.7 SLURM array eval jobs | To do |

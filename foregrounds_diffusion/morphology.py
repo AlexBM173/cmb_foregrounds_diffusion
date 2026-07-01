@@ -154,7 +154,7 @@ def _eigendecompose_2x2(W):
 
 
 def compute_minkowski_tensors(maps_nhw, norm_fn, thresholds,
-                               tensor_types=('W012',), centred=True):
+                               tensor_types=('W012',), centred=True, n_jobs=1):
     """Compute Minkowski tensor anisotropy indices across intensity thresholds.
 
     For each map and threshold ν, the map is binarised to the excursion set
@@ -187,6 +187,9 @@ def compute_minkowski_tensors(maps_nhw, norm_fn, thresholds,
     centred : bool
         If True (default), subtract the excursion-set centroid from position
         vectors before forming the tensor.  Affects W200 and W201 only.
+    n_jobs : int
+        Number of parallel workers (joblib).  1 = serial (default).
+        −1 = use all cores.
 
     Returns
     -------
@@ -216,6 +219,19 @@ def compute_minkowski_tensors(maps_nhw, norm_fn, thresholds,
     thresholds = np.asarray(thresholds)
     N, T = len(maps_nhw), len(thresholds)
 
+    if n_jobs != 1:
+        from joblib import Parallel, delayed
+        chunks = np.array_split(np.arange(N), abs(n_jobs) if n_jobs != -1 else N)
+        parts = Parallel(n_jobs=n_jobs)(
+            delayed(compute_minkowski_tensors)(
+                maps_nhw[idx], norm_fn, thresholds, tensor_types, centred, 1
+            )
+            for idx in chunks if len(idx) > 0
+        )
+        return {tt: {stat: np.concatenate([p[tt][stat] for p in parts], axis=0)
+                     for stat in ('beta', 'theta')}
+                for tt in tensor_types}
+
     results = {
         tt: {'beta': np.ones((N, T)), 'theta': np.zeros((N, T))}
         for tt in tensor_types
@@ -223,8 +239,10 @@ def compute_minkowski_tensors(maps_nhw, norm_fn, thresholds,
 
     for i, m in enumerate(maps_nhw):
         m_norm = np.ascontiguousarray(norm_fn(m), dtype=np.float64)
-        for t, nu in enumerate(thresholds):
-            binary = m_norm > nu
+        # Vectorise threshold binarisation: compute all T masks at once
+        # to reduce Python-loop overhead and improve cache locality.
+        all_binary = m_norm[np.newaxis] > thresholds[:, np.newaxis, np.newaxis]
+        for t, binary in enumerate(all_binary):
             n_interior = int(binary.sum())
             if n_interior < 2 or n_interior > binary.size - 2:
                 continue                              # trivially isotropic

@@ -1,6 +1,6 @@
 import numpy as np
 
-from foregrounds_diffusion.flatmaps import map2cl, bandpass_filter
+from foregrounds_diffusion.flatmaps import _build_ell_bin_cache, bandpass_filter, map2cl
 
 
 # ---------------------------------------------------------------------------
@@ -30,9 +30,11 @@ def mean_cls(maps_nhw, mapparams, lmin, lmax, binsize):
     std_cl : ndarray
         Standard deviation across maps.
     """
+    cache = _build_ell_bin_cache(mapparams, binsize=binsize, minbin=lmin, maxbin=lmax)
     cls = []
     for m in maps_nhw:
-        el, cl = map2cl(mapparams, m, binsize=binsize, minbin=lmin, maxbin=lmax)
+        el, cl = map2cl(mapparams, m, binsize=binsize, minbin=lmin, maxbin=lmax,
+                        _ell_bin_cache=cache)
         cls.append(cl)
     cls = np.array(cls)
     return el, cls.mean(axis=0), cls.std(axis=0)
@@ -58,9 +60,11 @@ def mean_cross_cls(maps1, maps2, mapparams, lmin, lmax, binsize):
     mean_cl : ndarray
     std_cl : ndarray
     """
+    cache = _build_ell_bin_cache(mapparams, binsize=binsize, minbin=lmin, maxbin=lmax)
     cls = []
     for m1, m2 in zip(maps1, maps2):
-        el, cl = map2cl(mapparams, m1, m2, binsize=binsize, minbin=lmin, maxbin=lmax)
+        el, cl = map2cl(mapparams, m1, m2, binsize=binsize, minbin=lmin, maxbin=lmax,
+                        _ell_bin_cache=cache)
         cls.append(cl)
     cls = np.array(cls)
     return el, cls.mean(axis=0), cls.std(axis=0)
@@ -98,7 +102,29 @@ def compute_summed_moments(cib_arr, tsz_arr, bp_filters):
     return moments
 
 
-def compute_cross_moments(cib_arr, tsz_arr, bp_filters):
+def _cross_moments_one_map(cib, tsz, bp_filters):
+    """Compute 12 cross-moments for a single map pair across all ℓ-bands."""
+    L = len(bp_filters)
+    out = np.zeros((L, 12))
+    for b, bp in enumerate(bp_filters):
+        a      = bandpass_filter(cib, bp)
+        bfield = bandpass_filter(tsz, bp)
+        out[b, 0]  = np.mean(a ** 2)
+        out[b, 1]  = np.mean(bfield ** 2)
+        out[b, 2]  = np.mean(a * bfield)
+        out[b, 3]  = np.mean(a ** 3)
+        out[b, 4]  = np.mean(bfield ** 3)
+        out[b, 5]  = np.mean(a ** 2 * bfield)
+        out[b, 6]  = np.mean(a * bfield ** 2)
+        out[b, 7]  = np.mean(a ** 4)
+        out[b, 8]  = np.mean(bfield ** 4)
+        out[b, 9]  = np.mean(a ** 3 * bfield)
+        out[b, 10] = np.mean(a ** 2 * bfield ** 2)
+        out[b, 11] = np.mean(a * bfield ** 3)
+    return out
+
+
+def compute_cross_moments(cib_arr, tsz_arr, bp_filters, n_jobs=1):
     """Compute all 12 cross-moments per ℓ-band (a=CIB, b=tSZ).
 
     Moments: S2^{aa}, S2^{bb}, S2^{ab},
@@ -110,31 +136,29 @@ def compute_cross_moments(cib_arr, tsz_arr, bp_filters):
     cib_arr : ndarray, shape (N, H, W)
     tsz_arr : ndarray, shape (N, H, W)
     bp_filters : list of ndarray
+    n_jobs : int
+        Number of parallel workers (joblib).  1 = serial (default).
+        −1 = use all cores.
 
     Returns
     -------
     moments : ndarray, shape (N, len(bp_filters), 12)
     labels : list of str
     """
-    N, L = len(cib_arr), len(bp_filters)
-    moments_out = np.zeros((N, L, 12))
     labels = ['S2aa', 'S2bb', 'S2ab',
               'S3aaa', 'S3bbb', 'S3aab', 'S3abb',
               'S4aaaa', 'S4bbbb', 'S4aaab', 'S4aabb', 'S4abbb']
-    for b, bp in enumerate(bp_filters):
-        for i in range(N):
-            a = bandpass_filter(cib_arr[i], bp)
-            bfield = bandpass_filter(tsz_arr[i], bp)
-            moments_out[i, b, 0]  = np.mean(a ** 2)
-            moments_out[i, b, 1]  = np.mean(bfield ** 2)
-            moments_out[i, b, 2]  = np.mean(a * bfield)
-            moments_out[i, b, 3]  = np.mean(a ** 3)
-            moments_out[i, b, 4]  = np.mean(bfield ** 3)
-            moments_out[i, b, 5]  = np.mean(a ** 2 * bfield)
-            moments_out[i, b, 6]  = np.mean(a * bfield ** 2)
-            moments_out[i, b, 7]  = np.mean(a ** 4)
-            moments_out[i, b, 8]  = np.mean(bfield ** 4)
-            moments_out[i, b, 9]  = np.mean(a ** 3 * bfield)
-            moments_out[i, b, 10] = np.mean(a ** 2 * bfield ** 2)
-            moments_out[i, b, 11] = np.mean(a * bfield ** 3)
+    N = len(cib_arr)
+
+    if n_jobs != 1:
+        from joblib import Parallel, delayed
+        rows = Parallel(n_jobs=n_jobs)(
+            delayed(_cross_moments_one_map)(cib_arr[i], tsz_arr[i], bp_filters)
+            for i in range(N)
+        )
+        return np.stack(rows, axis=0), labels
+
+    moments_out = np.zeros((N, len(bp_filters), 12))
+    for i in range(N):
+        moments_out[i] = _cross_moments_one_map(cib_arr[i], tsz_arr[i], bp_filters)
     return moments_out, labels

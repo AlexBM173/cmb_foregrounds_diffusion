@@ -115,8 +115,36 @@ def cl_to_cl2d(el, cl, flatskymapparams):
     return cl2d
 
 
+def _build_ell_bin_cache(flatskymapparams, binsize=None, minbin=100, maxbin=10000):
+    """Pre-compute ℓ-bin index arrays for reuse across many map2cl calls.
+
+    Returns
+    -------
+    binarr : ndarray
+        Bin left-edges (``np.arange(minbin, maxbin, binsize)``).
+    bin_idx : ndarray of int, shape (ny*nx,)
+        0-indexed bin assignment per pixel; −1 for pixels below *minbin*,
+        len(binarr) for pixels above the last bin's upper edge (both
+        excluded by *valid_ell*).
+    valid_ell : ndarray of bool, shape (ny*nx,)
+        True for pixels within ``[minbin, binarr[-1]+binsize)``.  Pre-combined
+        so the per-call work inside :func:`map2cl` is a single bitwise-AND
+        with the PSD nonzero mask.
+    binsize : float
+    """
+    lx, ly = get_lxly(flatskymapparams)
+    if binsize is None:
+        binsize   = float(lx.ravel()[1] - lx.ravel()[0])
+    binarr    = np.arange(minbin, maxbin, binsize)
+    ell_flat  = np.sqrt(lx ** 2 + ly ** 2).ravel()
+    bin_idx   = np.digitize(ell_flat, binarr) - 1
+    upper_edge = float(binarr[-1]) + binsize
+    valid_ell = (bin_idx >= 0) & (bin_idx < len(binarr)) & (ell_flat < upper_edge)
+    return binarr, bin_idx, valid_ell, float(binsize)
+
+
 def map2cl(flatskymapparams, flatskymap1, flatskymap2=None,
-           binsize=None, minbin=100, maxbin=10000):
+           binsize=None, minbin=100, maxbin=10000, _ell_bin_cache=None):
     """Compute auto- or cross-power spectrum of flat-sky map(s).
 
     Parameters
@@ -131,6 +159,11 @@ def map2cl(flatskymapparams, flatskymap1, flatskymap2=None,
         Bin width in ℓ.  Computed automatically when *None*.
     minbin, maxbin : float
         Minimum and maximum ℓ bins.
+    _ell_bin_cache : tuple, optional
+        Pre-computed ``(binarr, bin_idx, valid_ell, binsize)`` from
+        :func:`_build_ell_bin_cache`.  When supplied, skips ``get_lxly``,
+        ``sqrt``, and ``np.digitize`` — pass through ``mean_cls`` /
+        ``mean_cross_cls`` to amortise across N maps.
 
     Returns
     -------
@@ -139,23 +172,41 @@ def map2cl(flatskymapparams, flatskymap1, flatskymap2=None,
     """
     nx, ny, dx, dy = flatskymapparams
     dx_rad = np.radians(dx / 60.)
-    lx, ly = get_lxly(flatskymapparams)
+    flatskymap1 = np.ascontiguousarray(flatskymap1)
 
-    if binsize is None:
-        binsize = lx.ravel()[1] - lx.ravel()[0]
+    if _ell_bin_cache is not None:
+        binarr, bin_idx, valid_ell, binsize = _ell_bin_cache
+    else:
+        lx, ly = get_lxly(flatskymapparams)
+        if binsize is None:
+            binsize   = float(lx.ravel()[1] - lx.ravel()[0])
+        binarr    = np.arange(minbin, maxbin, binsize)
+        ell_flat  = np.sqrt(lx ** 2 + ly ** 2).ravel()
+        bin_idx   = np.digitize(ell_flat, binarr) - 1
+        upper_edge = float(binarr[-1]) + binsize
+        valid_ell = (bin_idx >= 0) & (bin_idx < len(binarr)) & (ell_flat < upper_edge)
 
     if flatskymap2 is None:
         flatskymap_psd = abs(np.fft.fft2(flatskymap1) * dx_rad) ** 2 / (nx * ny)
     else:
+        flatskymap2 = np.ascontiguousarray(flatskymap2)
         assert flatskymap1.shape == flatskymap2.shape
         flatskymap_psd = (np.fft.fft2(flatskymap1) * dx_rad
                          * np.conj(np.fft.fft2(flatskymap2)) * dx_rad
                          / (nx * ny))
 
-    rad_prf = radial_profile(flatskymap_psd, (lx, ly),
-                             bin_size=binsize, minbin=minbin,
-                             maxbin=maxbin, to_arcmins=0)
-    el, cl = rad_prf[:, 0], rad_prf[:, 1]
+    # Vectorised binning: np.bincount replaces the O(B × H²) Python loop
+    # in the legacy radial_profile.  valid_ell is pre-computed by the cache
+    # and masks pixels outside [minbin, last_bin_upper_edge).
+    psd_flat = flatskymap_psd.ravel()
+    nonzero  = np.abs(psd_flat) > 0
+    valid    = valid_ell & nonzero
+    hits     = np.bincount(bin_idx[valid], minlength=len(binarr)).astype(float)
+    cl_sum   = np.bincount(bin_idx[valid],
+                           weights=np.real(psd_flat[valid]),
+                           minlength=len(binarr))
+    cl       = np.where(hits > 0, cl_sum / hits, 0.0)
+    el       = binarr + binsize / 2.
     return el, cl
 
 

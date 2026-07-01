@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev  = ["pytest>=7", "pytest-cov"]
+dev  = ["pytest>=7", "pytest-cov", "joblib>=1.3"]
 docs = ["sphinx>=7", "furo", "nbsphinx", "sphinx-copybutton",
         "sphinx-autodoc-typehints", "ipykernel"]
 

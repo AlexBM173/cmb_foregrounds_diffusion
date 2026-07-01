@@ -33,7 +33,7 @@ because the cluster is down. Phases 1–6 are all in scope.
 | §3.2 `n_jobs` on remaining functions + scaling plots | ✅ Complete |
 | §3.4–3.5 Multi-GPU + MPI evaluation | To do (cluster dependent) |
 | §3.7 SLURM array eval jobs | To do |
-| §4 Documentation + ReadTheDocs | To do |
+| §4 Documentation + ReadTheDocs | ✅ Complete (connect RTD manually per §4.4) |
 | §5 PyPI distribution | To do |
 | §6.5 Additional CI/CD | To do |
 

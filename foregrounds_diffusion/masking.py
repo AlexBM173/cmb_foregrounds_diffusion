@@ -4,7 +4,7 @@ Flat-sky helpers (formerly in ``preprocessing``):
     get_peak_masks, inpaint_masked_regions, boundary_apod_mask,
     get_mask_using_gaussian_fitting
 
-AGORA MDPL2 cluster/point-source masks (formerly ``get_cluster_source_mask_for_agora``):
+AGORA MDPL2 cluster/point-source masks:
     get_mdpl2_halo_cat, get_cluster_mask_radius,
     get_point_source_mask_in_healpix, get_mdpl2_conversion_factors_K_to_MjyperSr,
     apodize_binary_mask_prof, get_apodised_mdpl2_cluster_mask

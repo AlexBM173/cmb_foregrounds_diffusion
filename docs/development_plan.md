@@ -29,6 +29,7 @@ because the cluster is down. Phases 1–6 are all in scope.
 | §6.1–6.4 CI foundation (tests.yml + lint.yml) | ✅ Complete |
 | §7 Codebase cleanup (redundant files + old notebooks) | Next |
 | §8 Publication-quality plots | Next |
+| §9 Notebook variable naming consistency | Next |
 | §3.2 `n_jobs` on remaining functions + scaling plots | To do |
 | §3.4–3.5 Multi-GPU + MPI evaluation | To do (cluster dependent) |
 | §3.7 SLURM array eval jobs | To do |
@@ -1826,6 +1827,122 @@ to be ported to the new style:
 
 ---
 
+## Phase 9 — Notebook Variable Naming Consistency
+
+A reader moving through the tutorial series should not have to re-learn variable
+names between notebooks. This phase establishes a canonical glossary, documents
+every current deviation, and records the per-notebook edits needed.
+
+---
+
+### 9.1 Canonical name glossary
+
+| Object | Canonical name | Type / shape | Notes |
+|---|---|---|---|
+| Flat-sky map parameters | `flatskymapparams` | `[nx, ny, dx, dy]` — `list[int, int, float, float]` | dx = dy = **1.40625** arcmin exactly (= 6° × 60 / 256); `1.41` in 06 and 07 is a bug |
+| AGORA CIB patch stack (full, loaded) | `cib_maps` | `(N, H, W, 1)` channels-last | Renamed `cib_patches` in 03 |
+| AGORA tSZ patch stack (full, loaded) | `tsz_maps` | `(N, H, W, 1)` channels-last | Renamed `tsz_patches` in 03 |
+| AGORA CIB for stats (channels-first slice) | `agora_cib` | `(N, H, W)` | Sliced from `cib_maps[..., 0].transpose(0, ...)` or channels-first load |
+| AGORA tSZ for stats | `agora_tsz` | `(N, H, W)` | Mirror of above |
+| DDPM raw sample array (file on disk) | `ddpm_raw` | `(N, 2, H, W)` channels-first | Current name in 06–12; `sample_data` in 01 |
+| DDPM CIB channel | `ddpm_cib` | `(N, H, W)` | `ddpm_raw[:, 0]` |
+| DDPM tSZ channel | `ddpm_tsz` | `(N, H, W)` | `ddpm_raw[:, 1]` |
+| Gaussian baseline array (file on disk) | `gauss_maps` | `(N, 2, H, W)` channels-first | Already consistent in 06–12 |
+| Gaussian CIB channel | `gauss_cib` | `(N, H, W)` | `gauss_maps[:, 0]` |
+| Gaussian tSZ channel | `gauss_tsz` | `(N, H, W)` | `gauss_maps[:, 1]` |
+| Point-source threshold (mJy) | `PTSRC` | `int` (2 or 6) | Already consistent across all notebooks |
+| Project root path | `PROJECT_ROOT` | `pathlib.Path` | Already consistent |
+| Patches directory | `PATCHES_DIR` | `pathlib.Path` | `PROJECT_ROOT / "data" / "low_pass" / f"{PTSRC}mJy"` — consistent in 06–12 |
+| CIB file path | `fpath_cib` | `pathlib.Path` | Deviates in 04 (uses bare string); should use `PATCHES_DIR / filename` |
+| tSZ file path | `fpath_tsz` | `pathlib.Path` | Same |
+| Checkpoint path | `CHECKPOINT` | `pathlib.Path` | Already consistent in 05 |
+| Maximum patches to analyse | `N_MAPS` | `int` | Config constant; `N_MAPS = 500` or similar; replaces bare `N = min(...)` |
+| Actual patch count after capping | `n_maps` | `int` | `n_maps = min(N_MAPS, len(agora_cib), len(ddpm_cib), len(gauss_cib))` |
+| Multipole array (from `map2cl`) | `el` | `(n_bins,) float` | Matches the `map2cl` return name; `ell` and `el_arr` in 03 are deviations |
+| Power spectrum array | `cl` | `(n_bins,) float` | Or `cl_cib`, `cl_cross`, etc. for named spectra |
+| Bandpass ℓ-edge pairs | `bp_edges` | `list[tuple[float, float]]` | List of `(lmin, lmax)` pairs; `bandpass_edges` in 07 |
+| 2D bandpass filter arrays | `bp_filters` | `list[(H, W) float]` | Already consistent in 07 |
+| Threshold array (morphology / peaks) | `thresholds` | `(T,) float` | `thresholds_fixed` in 13 is an unnecessary suffix |
+| Map parameters for benchmarks | `flatskymapparams` | Same as above | `params` in 13 is a deviation; rename for consistency |
+
+---
+
+### 9.2 Per-notebook change list
+
+**`03_patch_extraction.ipynb`**
+- Rename `cib_patches` → `cib_maps`, `tsz_patches` → `tsz_maps`
+- Rename `ell` and `el_arr` → `el` (match `map2cl` return convention)
+- Rename `n_maps` → keep as-is (it is already the actual count)
+
+**`04_model_and_training.ipynb`**
+- Replace `fpath_cib = f"..."` and `fpath_tsz = f"..."` with `PATCHES_DIR`-relative paths:
+  ```python
+  PATCHES_DIR = PROJECT_ROOT / "data" / "low_pass" / f"{PTSRC}mJy"
+  fpath_cib = PATCHES_DIR / f"CIB_map_150GHz_256_st6_minmax_{PTSRC}mJy_zero_lp.npy"
+  fpath_tsz = PATCHES_DIR / f"tSZ3_map_150GHz_256_st6_minmax_{PTSRC}mJy_norm_lp.npy"
+  ```
+
+**`05_sampling.ipynb`**
+- Replace bare string `"data/low_pass/{PTSRC}mJy/..."` paths with `PATCHES_DIR`-relative paths
+- Rename `cib_train` → `cib_maps`, `tsz_train` → `tsz_maps` (only used as rescaling reference here — the name `train` is misleading because these are normalised training patches, not a train/test split)
+
+**`06_power_spectra.ipynb`** ⚠ contains a bug
+- **Bug fix:** `flatskymapparams = [256, 256, 1.41, 1.41]` → `[256, 256, 1.40625, 1.40625]`
+- Replace `N = min(len(agora_cib), ...)` pattern with two lines:
+  ```python
+  N_MAPS = 500           # config constant at top of notebook
+  n_maps = min(N_MAPS, len(agora_cib), len(ddpm_cib), len(gauss_cib))
+  ```
+- Rename `el` loop variable to be consistent with API (already `el` here — no change needed)
+
+**`07_higher_order_stats.ipynb`** ⚠ contains a bug
+- **Bug fix:** `flatskymapparams = [256, 256, 1.41, 1.41]` → `[256, 256, 1.40625, 1.40625]`
+- Rename `bandpass_edges` → `bp_edges` for consistency with glossary
+- Replace `N=5` display snippet with `N_MAPS = 5  # display subset` to disambiguate from the count
+
+**`08_morphology_and_histograms.ipynb`**
+- Add `N_MAPS` config constant at top; replace implicit `N` usages
+
+**`10_peak_minima_counts.ipynb`**, **`11_scattering_transforms.ipynb`**, **`12_minkowski_tensors.ipynb`**
+- These three are already internally consistent with each other; main change is ensuring `N_MAPS` is declared in the config cell (it is, as `N_MAPS`) and that the `n_maps = min(...)` pattern uses lowercase
+
+**`13_benchmarks.ipynb`**
+- Rename `params` → `flatskymapparams` (the benchmark fixture that represents the production map size)
+- Rename `thresholds_fixed` → `thresholds`
+
+---
+
+### 9.3 Pixel-size bug (priority fix)
+
+`flatskymapparams = [256, 256, 1.41, 1.41]` in notebooks 06 and 07 uses a
+rounded pixel size. The exact value is:
+
+```
+dx = 6° × 60 arcmin/° / 256 pixels = 360/256 = 1.40625 arcmin/pixel
+```
+
+Using `1.41` introduces a 0.27% error in all ℓ values computed via `get_lxly`
+(since `lx ∝ 1/dx`). This shifts every ℓ bin by ~3 — negligible for qualitative
+plots but inconsistent with the data conventions described in `CLAUDE.md` and with
+the value used in all other notebooks, tests, and `conftest.py`.
+
+Fix in both notebooks before any other changes in this phase.
+
+---
+
+### 9.4 Anti-patterns to eliminate
+
+- **Bare capital `N` as both a config limit and a computed count** — use `N_MAPS` (config)
+  and `n_maps` (computed) to make the distinction explicit
+- **`cib_train` / `tsz_train` for the normalised patch arrays** — the `train` suffix
+  implies a train/test split that does not exist here; use `cib_maps` / `tsz_maps`
+- **`ell` / `el_arr` mixed with `el`** — the `map2cl` function returns `(el, cl)`;
+  unpack with those names consistently so readers can match notebook code to API docs
+- **Bare string paths** in 05 (`"data/low_pass/{PTSRC}mJy/..."`) — use `PATCHES_DIR`
+  so that changing `PTSRC` or `PROJECT_ROOT` propagates everywhere
+
+---
+
 ## Sequencing recommendation
 
 1. ✅ **Tests** — full unit + integration suite across all modules.
@@ -1836,13 +1953,14 @@ to be ported to the new style:
 6. ✅ **Numba JIT** — §2.6a; skipped (accumulation < 3% of runtime).
 7. ✅ **GPU port** — `map2cl_torch` with equivalence test (§3.3).
 8. **Codebase cleanup** — §7; review then delete `redundant/` scripts and old `docs/` notebooks; migrate `05_plots.ipynb` to tutorial 14. ← Next
-9. **Publication-quality plots** — §8; create `plot_style.py`; rewrite all paper figures in tutorial 14 to use Wong palette, correct cmaps, PDF+PNG output.
-10. **`n_jobs` on remaining functions + strong/weak scaling plots** — §3.2 full; Figures 11–12.
-11. **MPI wrapper + eval SLURM array job** — §3.5/3.7; Figure 13.
-12. **Multi-node training SLURM script** — DDP config (§3.6); validate on 2 nodes.
-13. **Docstring audit** — §4.1; prerequisite for Sphinx.
-14. **Sphinx + RTD skeleton** — §4.2–4.5; get a basic build passing.
-15. **`pyproject.toml` audit + TestPyPI** — §5.2–5.4; dry-run the publish workflow.
-16. **PyPI publish** — §5.5–5.6; tag `v0.1.0`; set up Trusted Publisher; release.
-17. **Cython** — §2.6g; only if Numba JIT is insufficient.
-18. **Additional CI items** — §6.5; dependency pinning, notebook smoke tests, `towncrier`.
+9. **Notebook naming consistency** — §9; fix `dx=1.41` bug in 06+07; rename per §9.1 glossary; eliminate `N`/`cib_train`/`ell` anti-patterns.
+10. **Publication-quality plots** — §8; create `plot_style.py`; rewrite all paper figures in tutorial 14 to use Wong palette, correct cmaps, PDF+PNG output.
+11. **`n_jobs` on remaining functions + strong/weak scaling plots** — §3.2 full; Figures 11–12.
+12. **MPI wrapper + eval SLURM array job** — §3.5/3.7; Figure 13.
+13. **Multi-node training SLURM script** — DDP config (§3.6); validate on 2 nodes.
+14. **Docstring audit** — §4.1; prerequisite for Sphinx.
+15. **Sphinx + RTD skeleton** — §4.2–4.5; get a basic build passing.
+16. **`pyproject.toml` audit + TestPyPI** — §5.2–5.4; dry-run the publish workflow.
+17. **PyPI publish** — §5.5–5.6; tag `v0.1.0`; set up Trusted Publisher; release.
+18. **Cython** — §2.6g; only if Numba JIT is insufficient.
+19. **Additional CI items** — §6.5; dependency pinning, notebook smoke tests, `towncrier`.

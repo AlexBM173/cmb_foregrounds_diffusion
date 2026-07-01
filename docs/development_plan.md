@@ -9,53 +9,29 @@ with the following ordering constraints:
 
 ---
 
-## Deadline and scope triage
+## Scope
 
-**Thesis deadline: 2026-07-08 (7 days from current date).**
-The HPC is down and expected to remain so until the deadline, so Phase 0 (model extensions)
-is removed. Phases 1–3 provide methodological rigour and are the primary focus for the
-remaining time. Phases 4–6 are engineering polish that must be deferred beyond submission.
+**Thesis deadline: 2026-07-08.**
+All phases are pre-submission. Phase 0 (model extensions requiring HPC) is excluded
+because the cluster is down. Phases 1–6 are all in scope.
 
-### Effort estimates (7-day window)
+### Status
 
-| Phase / section | Estimated effort | Priority |
-|---|---|---|
-| §1.1–1.3 Infrastructure + unit tests (flatmaps, moments, morphology) | 1.5 days | Must-do |
-| §2.1–2.3 Profiling baseline sweeps | 0.5 day | Should-do |
-| §2.4 Benchmark notebook skeleton | 0.5 day | Should-do |
-| §2.6b–c NumPy vectorisation + ℓ-bin precompute | 0.5 day | Should-do (no external deps) |
-| §3.2 `n_jobs` on two bottleneck functions | 0.5 day | Should-do |
-| §2.6a Numba JIT (pending profiling result) | 0.5 day | Optional |
-| §3.3 GPU port `map2cl_torch` | 0.5 day | Optional |
-| All remaining sections | — | Deferred — see below |
-
-### Minimum-viable-thesis subset
-
-The following is sufficient to support the methodological claims in the thesis:
-
-1. Phase 1 tests for `flatmaps`, `moments`, and `morphology` (the three modules
-   invoked in every evaluation notebook). Tests for `stacking`, `peak_counts`, and
-   `scattering_stats` can be deferred if time runs out.
-2. §2.1–2.3 profiling baseline for `compute_minkowski_tensors` and
-   `compute_cross_moments` — the two dominant bottlenecks in the evaluation pipeline.
-3. §2.6b–c NumPy threshold vectorisation and ℓ-bin pre-computation (both are
-   dependency-free and low-risk).
-4. §3.2 `n_jobs` parameter on `compute_minkowski_tensors` and
-   `compute_cross_moments` only.
-
-### Explicit cut / defer list
-
-The following are explicitly **deferred past the thesis deadline**:
-
-| Item | Section | Reason |
-|---|---|---|
-| MPI multi-node evaluation | §3.5 | Requires cluster allocation; deadlock risk if rushed |
-| DeepSpeed / multi-node training | §3.6 | Not needed at dim=64; see §3.6 for DDP alternative |
-| Cython extensions | §2.6g | Only needed if Numba JIT proves insufficient |
-| PyPI distribution | §5 | Post-submission packaging; no thesis value |
-| ReadTheDocs full setup | §4.3–4.5 | §4.1 docstring audit is sufficient for thesis appendix |
-| `towncrier` changelog | §6.5g | No changelog required pre-v1.0 |
-| Trusted Publisher + PyPI release | §5.5–5.6 | Post-submission |
+| Phase / section | Status |
+|---|---|
+| §1 Full unit + integration test suite | ✅ Complete (125 tests) |
+| §2.1–2.3 Profiling baseline sweeps | ✅ Complete |
+| §2.4 Benchmark notebook | ✅ Complete |
+| §2.6b–c NumPy vectorisation + ℓ-bin precompute | ✅ Complete |
+| §3.2 `n_jobs` on two bottleneck functions | ✅ Complete |
+| §6.1–6.4 CI foundation (tests.yml + lint.yml) | Next |
+| §2.6a Numba JIT | Pending profiling confirmation |
+| §3.3 GPU port `map2cl_torch` | To do |
+| §3.4–3.5 Multi-GPU + MPI evaluation | To do (cluster dependent) |
+| §3.7 SLURM array eval jobs | To do |
+| §4 Documentation + ReadTheDocs | To do |
+| §5 PyPI distribution | To do |
+| §6.5 Additional CI/CD | To do |
 
 ---
 
@@ -1611,19 +1587,19 @@ Catches lint errors locally before they reach CI, keeping the feedback loop tigh
 
 ## Sequencing recommendation
 
-Items 1–5 are within the 7-day thesis window; items 6–13 are post-submission.
-
-1. **CI foundation** — `tests.yml` + `lint.yml` + branch protection. Low effort, high value; do first.
-2. **Tests** — write `conftest.py` and unit tests for `flatmaps`, `moments`, `morphology`.
-3. **Baseline profiling** — run §2.2 sweeps and produce Figures 1–4; record in benchmark notebook.
-4. **Single-core optimisations** — NumPy vectorisation (§2.6b) and ℓ-bin precompute (§2.6c) first; Numba JIT (§2.6a) only if profiling confirms the accumulation is the bottleneck; re-profile for Figures 5–9.
-5. **`n_jobs` parallelisation** — add to `compute_minkowski_tensors` and `compute_cross_moments` (§3.2 minimum viable); produce strong/weak scaling plots (Figures 11–12).
-6. **(Deferred) GPU ports** — `map2cl_torch` with equivalence test (§3.3); produce Figure 14.
-7. **(Deferred) MPI wrapper + eval SLURM array job** — test on 2 CSD3 nodes; produce Figure 13.
-8. **(Deferred) Multi-node training SLURM script** — DDP config (§3.6); validate on 2 nodes.
-9. **Docstring audit** — prerequisite for useful API docs.
-10. **(Deferred) Sphinx + RTD skeleton** — get a basic build passing.
-11. **(Deferred) `pyproject.toml` audit + TestPyPI** — dry-run the publish workflow.
-12. **(Deferred) PyPI publish** — tag `v0.1.0`; set up Trusted Publisher; release.
-13. **(Deferred) Cython** — only if Numba JIT is insufficient.
-14. **(Deferred) Additional CI items** — dependency pinning, notebook smoke tests, `towncrier`.
+1. ✅ **Tests** — full unit + integration suite across all modules.
+2. ✅ **Baseline profiling** — §2.2 sweeps; Figures 1–4 in benchmark notebook.
+3. ✅ **Single-core optimisations** — §2.6b–c; Figures 5–9.
+4. ✅ **`n_jobs` parallelisation** — §3.2 on two bottleneck functions.
+5. **CI foundation** — `tests.yml` + `lint.yml` + branch protection. ← Next
+6. **Numba JIT** — §2.6a; only if profiling shows accumulation ≥ 30%.
+7. **GPU ports** — `map2cl_torch` with equivalence test (§3.3); Figure 14.
+8. **`n_jobs` on remaining functions + strong/weak scaling plots** — §3.2 full; Figures 11–12.
+9. **MPI wrapper + eval SLURM array job** — §3.5/3.7; Figure 13.
+10. **Multi-node training SLURM script** — DDP config (§3.6); validate on 2 nodes.
+11. **Docstring audit** — §4.1; prerequisite for Sphinx.
+12. **Sphinx + RTD skeleton** — §4.2–4.5; get a basic build passing.
+13. **`pyproject.toml` audit + TestPyPI** — §5.2–5.4; dry-run the publish workflow.
+14. **PyPI publish** — §5.5–5.6; tag `v0.1.0`; set up Trusted Publisher; release.
+15. **Cython** — §2.6g; only if Numba JIT is insufficient.
+16. **Additional CI items** — §6.5; dependency pinning, notebook smoke tests, `towncrier`.

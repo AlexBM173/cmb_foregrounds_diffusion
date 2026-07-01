@@ -1,16 +1,32 @@
 name: Lint
-on: [push, pull_request]
+
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install ruff mypy
-      - run: ruff check foregrounds_diffusion/
-      - run: ruff format --check foregrounds_diffusion/
-      - run: mypy foregrounds_diffusion/ --ignore-missing-imports
+
+      - name: Install linters
+        run: pip install ruff mypy
+
+      - name: ruff lint
+        run: ruff check foregrounds_diffusion/ tests/
+
+      - name: ruff format check
+        run: ruff format --check foregrounds_diffusion/ tests/
+
+      # mypy settings (ignore-missing-imports, allow-untyped-defs, redundant/ exclusion)
+      # are read from [tool.mypy] in pyproject.toml.
+      - name: mypy type check
+        run: mypy foregrounds_diffusion/

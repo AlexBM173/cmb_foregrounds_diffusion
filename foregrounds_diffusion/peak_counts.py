@@ -19,10 +19,10 @@ dependency used by Sabyr et al. is not needed for flat-sky patches.
 import numpy as np
 from scipy.ndimage import gaussian_filter, maximum_filter, minimum_filter
 
-
 # ---------------------------------------------------------------------------
 # Smoothing
 # ---------------------------------------------------------------------------
+
 
 def smooth_map(patch, fwhm_arcmin, pixel_res_arcmin=1.40625):
     """Smooth a 2D patch with a Gaussian kernel.
@@ -48,6 +48,7 @@ def smooth_map(patch, fwhm_arcmin, pixel_res_arcmin=1.40625):
 # ---------------------------------------------------------------------------
 # Peak and minima identification
 # ---------------------------------------------------------------------------
+
 
 def find_peaks(patch, filter_size=3):
     """Find local maxima (peaks) in a 2D map.
@@ -105,8 +106,10 @@ def find_minima(patch, filter_size=3):
 # Binned counts
 # ---------------------------------------------------------------------------
 
-def count_peaks_binned(patches_nhw, thresholds, fwhm_arcmin,
-                       pixel_res_arcmin=1.40625, filter_size=3):
+
+def count_peaks_binned(
+    patches_nhw, thresholds, fwhm_arcmin, pixel_res_arcmin=1.40625, filter_size=3
+):
     """Compute mean peak counts per map as a function of threshold ν.
 
     Following Sabyr et al. (2024), thresholds are defined in units of the
@@ -147,8 +150,9 @@ def count_peaks_binned(patches_nhw, thresholds, fwhm_arcmin,
     return counts
 
 
-def count_minima_binned(patches_nhw, thresholds, fwhm_arcmin,
-                        pixel_res_arcmin=1.40625, filter_size=3):
+def count_minima_binned(
+    patches_nhw, thresholds, fwhm_arcmin, pixel_res_arcmin=1.40625, filter_size=3
+):
     """Compute mean minima counts per map as a function of threshold ν.
 
     Minima with ν < threshold are counted (threshold should be negative).
@@ -191,9 +195,15 @@ def count_minima_binned(patches_nhw, thresholds, fwhm_arcmin,
 # Multi-scale convenience wrapper
 # ---------------------------------------------------------------------------
 
-def compute_peak_minima_counts(patches_nhw, thresholds_peaks, thresholds_minima,
-                               smoothing_scales_arcmin=(1.0, 2.5, 5.0),
-                               pixel_res_arcmin=1.40625, filter_size=3):
+
+def compute_peak_minima_counts(
+    patches_nhw,
+    thresholds_peaks,
+    thresholds_minima,
+    smoothing_scales_arcmin=(1.0, 2.5, 5.0),
+    pixel_res_arcmin=1.40625,
+    filter_size=3,
+):
     """Compute peak and minima counts at multiple smoothing scales.
 
     Parameters
@@ -228,10 +238,18 @@ def compute_peak_minima_counts(patches_nhw, thresholds_peaks, thresholds_minima,
     for fwhm in smoothing_scales_arcmin:
         print(f"Computing counts at FWHM = {fwhm} arcmin …")
         peaks = count_peaks_binned(
-            patches_nhw, thresholds_peaks, fwhm,
-            pixel_res_arcmin=pixel_res_arcmin, filter_size=filter_size)
+            patches_nhw,
+            thresholds_peaks,
+            fwhm,
+            pixel_res_arcmin=pixel_res_arcmin,
+            filter_size=filter_size,
+        )
         minima = count_minima_binned(
-            patches_nhw, thresholds_minima, fwhm,
-            pixel_res_arcmin=pixel_res_arcmin, filter_size=filter_size)
-        results[fwhm] = {'peaks': peaks, 'minima': minima}
+            patches_nhw,
+            thresholds_minima,
+            fwhm,
+            pixel_res_arcmin=pixel_res_arcmin,
+            filter_size=filter_size,
+        )
+        results[fwhm] = {"peaks": peaks, "minima": minima}
     return results

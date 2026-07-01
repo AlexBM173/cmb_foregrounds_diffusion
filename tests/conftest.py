@@ -31,19 +31,13 @@ def gaussian_patch(flatskymapparams):
 @pytest.fixture
 def patch_stack(flatskymapparams):
     np.random.seed(1)
-    return np.array([
-        make_gaussian_realisation(flatskymapparams, _EL, _CL)
-        for _ in range(16)
-    ])
+    return np.array([make_gaussian_realisation(flatskymapparams, _EL, _CL) for _ in range(16)])
 
 
 @pytest.fixture
 def patch_stack_256(flatskymapparams_256):
     np.random.seed(2)
-    return np.array([
-        make_gaussian_realisation(flatskymapparams_256, _EL, _CL)
-        for _ in range(16)
-    ])
+    return np.array([make_gaussian_realisation(flatskymapparams_256, _EL, _CL) for _ in range(16)])
 
 
 @pytest.fixture

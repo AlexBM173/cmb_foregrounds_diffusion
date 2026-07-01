@@ -6,8 +6,9 @@ neither is installed, tests that need them are skipped.
 
 scattering_summary is pure numpy and runs without any backend.
 """
-import sys
+
 import importlib
+import sys
 from unittest.mock import patch as mock_patch
 
 import numpy as np
@@ -15,10 +16,10 @@ import pytest
 
 import foregrounds_diffusion.scattering_stats as ss
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _has_backend():
     try:
@@ -30,12 +31,13 @@ def _has_backend():
 
 def _fake_coeffs(N=5, J=3, L=4):
     return {
-        'J': J, 'L': L,
-        'S0': np.ones((N, 1)),
-        'S1': np.ones((N, J)),
-        'S2': np.ones((N, J, J, L)),
-        'S1_mean': np.ones(J),
-        'S2_mean': np.ones((J, J, L)),
+        "J": J,
+        "L": L,
+        "S0": np.ones((N, 1)),
+        "S1": np.ones((N, J)),
+        "S2": np.ones((N, J, J, L)),
+        "S1_mean": np.ones(J),
+        "S2_mean": np.ones((J, J, L)),
     }
 
 
@@ -43,11 +45,12 @@ def _fake_coeffs(N=5, J=3, L=4):
 # _get_backend — graceful failure
 # ---------------------------------------------------------------------------
 
+
 def test_get_backend_raises_when_both_absent():
     """When neither scattering nor kymatio is importable, ImportError is raised."""
-    with mock_patch.dict(sys.modules, {'scattering': None, 'kymatio': None}):
+    with mock_patch.dict(sys.modules, {"scattering": None, "kymatio": None}):
         # Force both to appear missing even if installed
-        blocked = {'scattering': None, 'kymatio': None}
+        blocked = {"scattering": None, "kymatio": None}
         with mock_patch.dict(sys.modules, blocked):
             # Reload to bypass cached import inside the module
             with pytest.raises((ImportError, SystemError)):
@@ -61,13 +64,13 @@ def test_get_backend_import_error_message():
     # Temporarily remove both from sys.modules to simulate absence.
     saved = {}
     for key in list(sys.modules):
-        if key == 'scattering' or key.startswith('kymatio'):
+        if key == "scattering" or key.startswith("kymatio"):
             saved[key] = sys.modules.pop(key)
     try:
         with pytest.raises(ImportError) as exc_info:
             ss._get_backend()
         msg = str(exc_info.value)
-        assert 'scattering' in msg.lower() or 'kymatio' in msg.lower()
+        assert "scattering" in msg.lower() or "kymatio" in msg.lower()
     except ImportError:
         pass  # backend IS installed — message test is moot
     finally:
@@ -77,6 +80,7 @@ def test_get_backend_import_error_message():
 # ---------------------------------------------------------------------------
 # scattering_summary — pure numpy, no backend needed
 # ---------------------------------------------------------------------------
+
 
 def test_scattering_summary_shape_all_scales():
     """Output has N rows; features = J (S1) + J*(J-1)/2*L (S2 upper triangle)."""
@@ -121,12 +125,13 @@ def test_scattering_summary_single_scale():
 # compute_scattering_coefficients — skip when no backend
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(not _has_backend(), reason="no scattering backend installed")
 def test_compute_scattering_coefficients_output_keys():
     rng = np.random.default_rng(0)
     patches = rng.standard_normal((4, 32, 32)).astype(np.float32)
     coeffs = ss.compute_scattering_coefficients(patches, J=2, L=2)
-    for key in ('S0', 'S1', 'S2', 'S1_mean', 'S2_mean', 'J', 'L'):
+    for key in ("S0", "S1", "S2", "S1_mean", "S2_mean", "J", "L"):
         assert key in coeffs
 
 
@@ -136,14 +141,15 @@ def test_compute_scattering_coefficients_shapes():
     rng = np.random.default_rng(1)
     patches = rng.standard_normal((N, 32, 32)).astype(np.float32)
     coeffs = ss.compute_scattering_coefficients(patches, J=J, L=L)
-    assert coeffs['S0'].shape == (N, 1)
-    assert coeffs['S1'].shape == (N, J)
-    assert coeffs['S2'].shape[0] == N
+    assert coeffs["S0"].shape == (N, 1)
+    assert coeffs["S1"].shape == (N, J)
+    assert coeffs["S2"].shape[0] == N
 
 
 # ---------------------------------------------------------------------------
 # compute_scattering_covariance — skip when no backend
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(not _has_backend(), reason="no scattering backend installed")
 def test_compute_scattering_covariance_returns_dict_or_none():

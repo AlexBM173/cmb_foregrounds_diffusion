@@ -32,23 +32,27 @@ The Cheng et al. implementation is preferred because it is faster
 for large batches and exposes the scattering covariance C11 directly.
 """
 
-import numpy as np
 import warnings
+
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # Backend detection
 # ---------------------------------------------------------------------------
 
+
 def _get_backend():
     """Return ('cheng', module) or ('kymatio', module) or raise."""
     try:
         import scattering
-        return 'cheng', scattering
+
+        return "cheng", scattering
     except ImportError:
         pass
     try:
         import kymatio
-        return 'kymatio', kymatio
+
+        return "kymatio", kymatio
     except ImportError:
         raise ImportError(
             "No scattering transform backend found.\n"
@@ -62,6 +66,7 @@ def _get_backend():
 # ---------------------------------------------------------------------------
 # Coefficient computation
 # ---------------------------------------------------------------------------
+
 
 def compute_scattering_coefficients(patches_nhw, J=5, L=4, device=None):
     """Compute first- and second-order scattering coefficients.
@@ -104,32 +109,34 @@ def compute_scattering_coefficients(patches_nhw, J=5, L=4, device=None):
     N, H, W = patches_nhw.shape
     patches_f32 = patches_nhw.astype(np.float32)
 
-    if backend == 'cheng':
+    if backend == "cheng":
         import torch
+
         if device is None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         # Cheng et al. Scattering2d uses 'gpu'/'cpu', not 'cuda'
-        cheng_device = 'gpu' if device == 'cuda' else 'cpu'
+        cheng_device = "gpu" if device == "cuda" else "cpu"
 
         st_calc = mod.Scattering2d(M=H, N=W, J=J, L=L, device=cheng_device)
         # Pass tensor on CPU — the class handles GPU transfer internally
         s_mean = st_calc.scattering_coef_simple(torch.tensor(patches_f32))
 
-        S0 = s_mean['S0'].cpu().numpy()      # (N, 1)
-        S1 = s_mean['S1_iso'].cpu().numpy()  # (N, J)
-        S2 = s_mean['S2_iso'].cpu().numpy()  # (N, J, J, L)
+        S0 = s_mean["S0"].cpu().numpy()  # (N, 1)
+        S1 = s_mean["S1_iso"].cpu().numpy()  # (N, J)
+        S2 = s_mean["S2_iso"].cpu().numpy()  # (N, J, J, L)
 
-    elif backend == 'kymatio':
+    elif backend == "kymatio":
         import torch
         from kymatio.numpy import Scattering2D
 
         if device is None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            device = "cuda" if torch.cuda.is_available() else "cpu"
 
         warnings.warn(
             "Using kymatio backend. The Cheng et al. scattering package "
             "is preferred for speed and scattering covariance support.",
-            UserWarning)
+            UserWarning,
+        )
 
         scattering2d = Scattering2D(J=J, shape=(H, W), L=L)
         Sx = scattering2d(patches_f32)  # (N, 1+J*L+..., H/2^J, W/2^J)
@@ -139,10 +146,10 @@ def compute_scattering_coefficients(patches_nhw, J=5, L=4, device=None):
         n0 = 1
         S0 = Sx_mean[:, :n0]
         # kymatio S1: J*L coefficients → average over L to match Cheng S1_iso
-        S1_full = Sx_mean[:, n0:n0 + J * L].reshape(N, J, L)
+        S1_full = Sx_mean[:, n0 : n0 + J * L].reshape(N, J, L)
         S1 = S1_full.mean(axis=-1)  # (N, J)
         # S2: fill upper triangle (j1, j2, l=0) as approximation
-        S2_flat = Sx_mean[:, n0 + J * L:]
+        S2_flat = Sx_mean[:, n0 + J * L :]
         S2 = np.zeros((N, J, J, L))
         idx = 0
         for j1 in range(J):
@@ -153,13 +160,13 @@ def compute_scattering_coefficients(patches_nhw, J=5, L=4, device=None):
                         idx += 1
 
     return {
-        'S0': S0,
-        'S1': S1,
-        'S2': S2,
-        'S1_mean': S1.mean(axis=0),
-        'S2_mean': S2.mean(axis=0),
-        'J': J,
-        'L': L,
+        "S0": S0,
+        "S1": S1,
+        "S2": S2,
+        "S1_mean": S1.mean(axis=0),
+        "S2_mean": S2.mean(axis=0),
+        "J": J,
+        "L": L,
     }
 
 
@@ -196,26 +203,27 @@ def compute_scattering_covariance(patches_nhw, J=5, L=4, device=None):
             "Scattering covariance requires the Cheng et al. scattering "
             "package. Install from: "
             "https://github.com/SihaoCheng/scattering_transform",
-            UserWarning)
+            UserWarning,
+        )
         return None
 
     N, H, W = patches_nhw.shape
     if device is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    cheng_device = 'gpu' if device == 'cuda' else 'cpu'
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    cheng_device = "gpu" if device == "cuda" else "cpu"
 
     patches_f32 = patches_nhw.astype(np.float32)
     st_calc = scattering.Scattering2d(M=H, N=W, J=J, L=L, device=cheng_device)
     s_cov = st_calc.scattering_cov(torch.tensor(patches_f32))
 
     # Move all tensors to CPU numpy
-    return {k: v.cpu().numpy() if hasattr(v, 'cpu') else v
-            for k, v in s_cov.items()}
+    return {k: v.cpu().numpy() if hasattr(v, "cpu") else v for k, v in s_cov.items()}
 
 
 # ---------------------------------------------------------------------------
 # Summary statistics for comparison
 # ---------------------------------------------------------------------------
+
 
 def scattering_summary(coeffs, scale_idx=None):
     """Extract a flat summary vector from scattering coefficients.
@@ -234,15 +242,15 @@ def scattering_summary(coeffs, scale_idx=None):
     ndarray, shape (N, n_features)
         Flattened scattering features per map.
     """
-    J = coeffs['J']
+    J = coeffs["J"]
     scales = scale_idx if scale_idx is not None else list(range(J))
 
-    S1 = coeffs['S1'][:, scales]             # (N, n_scales)
+    S1 = coeffs["S1"][:, scales]  # (N, n_scales)
     # S2 upper triangle j2 > j1, all orientation differences
     S2_list = []
     for j1 in scales:
         for j2 in range(j1 + 1, J):
-            S2_list.append(coeffs['S2'][:, j1, j2, :])  # (N, L)
+            S2_list.append(coeffs["S2"][:, j1, j2, :])  # (N, L)
 
     parts = [S1]
     if S2_list:

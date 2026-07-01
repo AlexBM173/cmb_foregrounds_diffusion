@@ -18,7 +18,6 @@ import torch
 from accelerate import Accelerator
 from denoising_diffusion_pytorch import GaussianDiffusion, Unet
 
-
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
@@ -50,9 +49,9 @@ def build_model(channels: int = 2) -> GaussianDiffusion:
     return GaussianDiffusion(unet, image_size=256, timesteps=1000)
 
 
-def load_checkpoint(diffusion: GaussianDiffusion,
-                    checkpoint_path: str,
-                    accelerator: Accelerator) -> GaussianDiffusion:
+def load_checkpoint(
+    diffusion: GaussianDiffusion, checkpoint_path: str, accelerator: Accelerator
+) -> GaussianDiffusion:
     """Load model weights from *checkpoint_path* into *diffusion*.
 
     Parameters
@@ -72,14 +71,16 @@ def load_checkpoint(diffusion: GaussianDiffusion,
     device = accelerator.device
     data = torch.load(checkpoint_path, map_location=device)
     unwrapped = accelerator.unwrap_model(diffusion)
-    unwrapped.load_state_dict(data['model'])
+    unwrapped.load_state_dict(data["model"])
     return unwrapped
 
 
-def sample(diffusion: GaussianDiffusion,
-           accelerator: Accelerator,
-           num_batches: int = DEFAULT_BATCHES,
-           batch_size: int = DEFAULT_BATCH_SIZE) -> np.ndarray:
+def sample(
+    diffusion: GaussianDiffusion,
+    accelerator: Accelerator,
+    num_batches: int = DEFAULT_BATCHES,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> np.ndarray:
     """Draw samples from the trained diffusion model.
 
     Parameters
@@ -100,40 +101,46 @@ def sample(diffusion: GaussianDiffusion,
     """
     sampled_batches = []
     for i in range(num_batches):
-        print(f"Sampling batch {i + 1}/{num_batches} "
-              f"({(i / num_batches) * 100:.0f}% complete)")
+        print(f"Sampling batch {i + 1}/{num_batches} ({(i / num_batches) * 100:.0f}% complete)")
         with torch.no_grad():
-            batch = accelerator.gather(
-                diffusion.sample(batch_size=batch_size).detach())
+            batch = accelerator.gather(diffusion.sample(batch_size=batch_size).detach())
         sampled_batches.append(batch.cpu().numpy())
 
     return np.concatenate(sampled_batches, axis=0)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Sample from a trained DDPM foreground model.")
-    parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT,
-                        help="Path to model checkpoint (.pt)")
-    parser.add_argument("--batches", type=int, default=DEFAULT_BATCHES,
-                        help="Number of sampling batches")
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE,
-                        help="Samples per batch")
-    parser.add_argument("--output", default=DEFAULT_OUTPUT,
-                        help="Output .npy file path")
-    parser.add_argument("--channels", type=int, default=2,
-                        help="Number of map channels (default: 2 for CIB+tSZ)")
-    parser.add_argument("--wandb", action="store_true", default=False,
-                        help="Enable Weights & Biases logging (also set via WANDB=1 env var)")
+    parser = argparse.ArgumentParser(description="Sample from a trained DDPM foreground model.")
+    parser.add_argument(
+        "--checkpoint", default=DEFAULT_CHECKPOINT, help="Path to model checkpoint (.pt)"
+    )
+    parser.add_argument(
+        "--batches", type=int, default=DEFAULT_BATCHES, help="Number of sampling batches"
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Samples per batch"
+    )
+    parser.add_argument("--output", default=DEFAULT_OUTPUT, help="Output .npy file path")
+    parser.add_argument(
+        "--channels", type=int, default=2, help="Number of map channels (default: 2 for CIB+tSZ)"
+    )
+    parser.add_argument(
+        "--wandb",
+        action="store_true",
+        default=False,
+        help="Enable Weights & Biases logging (also set via WANDB=1 env var)",
+    )
     args = parser.parse_args()
 
     import os
+
     use_wandb = args.wandb or os.environ.get("WANDB", "").strip() in ("1", "true", "yes")
 
-    accelerator = Accelerator(split_batches=True, mixed_precision='fp16')
+    accelerator = Accelerator(split_batches=True, mixed_precision="fp16")
 
     if use_wandb and accelerator.is_main_process:
         import wandb
+
         wandb.init(
             project="cmb_foregrounds_diffusion",
             job_type="sampling",
@@ -152,9 +159,9 @@ def main():
     diffusion = load_checkpoint(diffusion, args.checkpoint, accelerator)
 
     print(f"Generating {args.batches * args.batch_size} samples …")
-    all_samples = sample(diffusion, accelerator,
-                         num_batches=args.batches,
-                         batch_size=args.batch_size)
+    all_samples = sample(
+        diffusion, accelerator, num_batches=args.batches, batch_size=args.batch_size
+    )
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,16 +170,20 @@ def main():
 
     if use_wandb and accelerator.is_main_process:
         import wandb
+
         n_show = min(8, len(all_samples))
-        wandb.log({
-            "samples/cib": [wandb.Image(all_samples[i, 0]) for i in range(n_show)],
-            "samples/tsz": [wandb.Image(all_samples[i, 1]) for i in range(n_show)],
-            "n_samples": len(all_samples),
-        })
+        wandb.log(
+            {
+                "samples/cib": [wandb.Image(all_samples[i, 0]) for i in range(n_show)],
+                "samples/tsz": [wandb.Image(all_samples[i, 1]) for i in range(n_show)],
+                "n_samples": len(all_samples),
+            }
+        )
         artifact = wandb.Artifact("samples", type="dataset")
         artifact.add_file(str(output_path))
         wandb.log_artifact(artifact)
         import wandb
+
         wandb.finish()
 
 

@@ -6,13 +6,13 @@ script-level execution code has been removed; call the functions directly or
 from a driver script.
 """
 
-import numpy as np
 import healpy as hp
-
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # Halo catalogue loading
 # ---------------------------------------------------------------------------
+
 
 def get_mdpl2_halo_cat(halo_cat_fname, get_velocities=True):
     """Load the MDPL2 halo catalogue.
@@ -34,29 +34,46 @@ def get_mdpl2_halo_cat(halo_cat_fname, get_velocities=True):
     loaded = np.load(halo_cat_fname, allow_pickle=True)
 
     if isinstance(loaded, np.lib.npyio.NpzFile):
-        mdpl2_ra    = loaded['totra']
-        mdpl2_dec   = loaded['totdec']
-        mdpl2_z     = loaded['totz']
-        mdpl2_m200c = loaded['totm200']
-        mdpl2_m500c = loaded['totm500']
-        mdpl2_vlos  = loaded['totvlos']
-        mdpl2_vtht  = loaded['totvtht']
-        mdpl2_vphi  = loaded['totvphi']
+        mdpl2_ra = loaded["totra"]
+        mdpl2_dec = loaded["totdec"]
+        mdpl2_z = loaded["totz"]
+        mdpl2_m200c = loaded["totm200"]
+        mdpl2_m500c = loaded["totm500"]
+        mdpl2_vlos = loaded["totvlos"]
+        mdpl2_vtht = loaded["totvtht"]
+        mdpl2_vphi = loaded["totvphi"]
     else:
         # Legacy .npy format: columns packed as rows
         cols = loaded.T
-        mdpl2_ra, mdpl2_dec, mdpl2_z, mdpl2_m200c, mdpl2_m500c, \
-            mdpl2_vlos, mdpl2_vtht, mdpl2_vphi = cols
+        (
+            mdpl2_ra,
+            mdpl2_dec,
+            mdpl2_z,
+            mdpl2_m200c,
+            mdpl2_m500c,
+            mdpl2_vlos,
+            mdpl2_vtht,
+            mdpl2_vphi,
+        ) = cols
 
     if get_velocities:
-        return mdpl2_ra, mdpl2_dec, mdpl2_z, mdpl2_m200c, mdpl2_m500c, \
-               mdpl2_vlos, mdpl2_vtht, mdpl2_vphi
+        return (
+            mdpl2_ra,
+            mdpl2_dec,
+            mdpl2_z,
+            mdpl2_m200c,
+            mdpl2_m500c,
+            mdpl2_vlos,
+            mdpl2_vtht,
+            mdpl2_vphi,
+        )
     return mdpl2_ra, mdpl2_dec, mdpl2_z, mdpl2_m200c, mdpl2_m500c
 
 
 # ---------------------------------------------------------------------------
 # Cluster mask radius
 # ---------------------------------------------------------------------------
+
 
 def get_cluster_mask_radius(m500c):
     """Return a mask radius in arcminutes based on cluster mass.
@@ -75,25 +92,31 @@ def get_cluster_mask_radius(m500c):
         Mask radius in arcminutes.
     """
     if m500c < 1e14:
-        return 3.
+        return 3.0
     elif m500c < 3e14:
-        return 5.
+        return 5.0
     elif m500c < 5e14:
-        return 8.
+        return 8.0
     else:
-        return 10.
+        return 10.0
 
 
 # ---------------------------------------------------------------------------
 # Point-source mask
 # ---------------------------------------------------------------------------
 
-def get_point_source_mask_in_healpix(freq, hmap_Mjy_per_sr,
-                                     threshold_mjy_freq0,
-                                     threshold2_mjy_freq0=None,
-                                     freq0=150., spec_index=3.4,
-                                     full_sky=True, ang_res_am=None,
-                                     return_flux_map_in_mjy=False):
+
+def get_point_source_mask_in_healpix(
+    freq,
+    hmap_Mjy_per_sr,
+    threshold_mjy_freq0,
+    threshold2_mjy_freq0=None,
+    freq0=150.0,
+    spec_index=3.4,
+    full_sky=True,
+    ang_res_am=None,
+    return_flux_map_in_mjy=False,
+):
     """Identify pixels containing point sources above a flux threshold.
 
     Parameters
@@ -127,10 +150,10 @@ def get_point_source_mask_in_healpix(freq, hmap_Mjy_per_sr,
     """
     if full_sky:
         nside = hp.get_nside(hmap_Mjy_per_sr)
-        pix_area = hp.nside2resol(nside) ** 2.
+        pix_area = hp.nside2resol(nside) ** 2.0
     else:
         assert ang_res_am is not None
-        pix_area = np.radians(ang_res_am / 60.) ** 2.
+        pix_area = np.radians(ang_res_am / 60.0) ** 2.0
 
     hmap_mjy = np.copy(hmap_Mjy_per_sr) * pix_area * 1e9  # MJy/sr → mJy
 
@@ -141,8 +164,7 @@ def get_point_source_mask_in_healpix(freq, hmap_Mjy_per_sr,
         mask_pixels = np.where(hmap_mjy >= threshold_mjy)
     else:
         threshold2 = threshold2_mjy_freq0 * scaling
-        mask_pixels = np.where((hmap_mjy >= threshold_mjy)
-                               & (hmap_mjy < threshold2))
+        mask_pixels = np.where((hmap_mjy >= threshold_mjy) & (hmap_mjy < threshold2))
 
     if full_sky:
         mask_pixels = mask_pixels[0]
@@ -155,6 +177,7 @@ def get_point_source_mask_in_healpix(freq, hmap_Mjy_per_sr,
 # ---------------------------------------------------------------------------
 # Unit-conversion factors
 # ---------------------------------------------------------------------------
+
 
 def get_mdpl2_conversion_factors_K_to_MjyperSr(expname, band):
     """Look up the K → MJy/sr conversion factor for a given experiment and band.
@@ -172,19 +195,24 @@ def get_mdpl2_conversion_factors_K_to_MjyperSr(expname, band):
     float
         Conversion factor.
     """
-    planck = {100: 243.623, 143: 371.036, 217: 481.882,
-              353: 287.281, 545: 57.6963, 857: 2.26476}
-    spt = {95: 208.973, 150: 375.876, 220: 472.522,
-           221: 473.332, 285: 414.977, 286: 414.977, 345: 310.827}
+    planck = {100: 243.623, 143: 371.036, 217: 481.882, 353: 287.281, 545: 57.6963, 857: 2.26476}
+    spt = {
+        95: 208.973,
+        150: 375.876,
+        220: 472.522,
+        221: 473.332,
+        285: 414.977,
+        286: 414.977,
+        345: 310.827,
+    }
     s4 = {145: 379.391 * 0.976, 155: 403.379 * 0.975}
-    generic = {95: 208.973, 150: 375.876, 220: 472.522,
-               285: 414.977, 345: 310.827}
+    generic = {95: 208.973, 150: 375.876, 220: 472.522, 285: 414.977, 345: 310.827}
 
-    if expname == 'planck':
+    if expname == "planck":
         return planck[band]
-    elif expname in ('spt3g', 'spt', 'spt4'):
+    elif expname in ("spt3g", "spt", "spt4"):
         return spt[band]
-    elif expname in ('cmbs4', 's4wide', 's4deep'):
+    elif expname in ("cmbs4", "s4wide", "s4deep"):
         return s4[band]
     else:
         return generic[band]
@@ -194,8 +222,8 @@ def get_mdpl2_conversion_factors_K_to_MjyperSr(expname, band):
 # Apodisation
 # ---------------------------------------------------------------------------
 
-def apodize_binary_mask_prof(binary_mask, dist_smooth_angle,
-                             apod_start_dist, apod_end_dist):
+
+def apodize_binary_mask_prof(binary_mask, dist_smooth_angle, apod_start_dist, apod_end_dist):
     """Apodise a binary HEALPix mask using a distance-based smooth profile.
 
     The apodisation profile is ``(x − sin x) / 2π`` on ``[0, 2π]``, the
@@ -220,19 +248,19 @@ def apodize_binary_mask_prof(binary_mask, dist_smooth_angle,
     net_dist = apod_end_dist - apod_start_dist
 
     dist_map = hp.dist2holes(binary_mask)
-    binary_mask[dist_map <= apod_start_dist] = 0.
+    binary_mask[dist_map <= apod_start_dist] = 0.0
 
     smooth_region = (dist_map > apod_start_dist) & (dist_map < apod_end_dist)
     nside = hp.get_nside(binary_mask)
     dist_map = hp.smoothing(dist_map, fwhm=dist_smooth_angle, lmax=nside)
 
     smooth_mask = np.array(binary_mask)
-    x = (dist_map[smooth_region] - apod_start_dist) / net_dist * 2. * np.pi
+    x = (dist_map[smooth_region] - apod_start_dist) / net_dist * 2.0 * np.pi
     del dist_map
-    smooth_mask[smooth_region] = (x - np.sin(x)) / (2. * np.pi)
+    smooth_mask[smooth_region] = (x - np.sin(x)) / (2.0 * np.pi)
 
     smooth_mask *= binary_mask
-    smooth_mask = np.clip(smooth_mask, 0., 1.)
+    smooth_mask = np.clip(smooth_mask, 0.0, 1.0)
     del binary_mask
     return smooth_mask
 
@@ -241,12 +269,16 @@ def apodize_binary_mask_prof(binary_mask, dist_smooth_angle,
 # Cluster mask
 # ---------------------------------------------------------------------------
 
-def get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname,
-                                    m500c_threshold=5e13,
-                                    cluster_lmz_dic=None,
-                                    howmanythetaforclusters=-1,
-                                    apodise=True,
-                                    expname=None):
+
+def get_apodised_mdpl2_cluster_mask(
+    nside,
+    halo_cat_fname,
+    m500c_threshold=5e13,
+    cluster_lmz_dic=None,
+    howmanythetaforclusters=-1,
+    apodise=True,
+    expname=None,
+):
     """Build an apodised HEALPix cluster mask from the MDPL2 halo catalogue.
 
     Parameters
@@ -262,7 +294,7 @@ def get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname,
     cluster_lmz_dic : dict, optional
         Redshift-dependent mass-limit dictionary (required when
         ``m500c_threshold=-1``).  Must contain keys ``'redshift'`` and
-    
+
         ``'M500c'``.
     howmanythetaforclusters : float
         If ``> 0``, compute the mask radius as this multiple of θ_500c.
@@ -277,21 +309,20 @@ def get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname,
     ndarray
         Final apodised (or binary) full-sky cluster mask.
     """
-    import copy
     from astropy.cosmology import FlatLambdaCDM
 
-    (mdpl2_ra, mdpl2_dec, mdpl2_z,
-     mdpl2_m200c, mdpl2_m500c,
-     mdpl2_vlos, mdpl2_vtht, mdpl2_vphi) = get_mdpl2_halo_cat(halo_cat_fname)
+    (mdpl2_ra, mdpl2_dec, mdpl2_z, mdpl2_m200c, mdpl2_m500c, mdpl2_vlos, mdpl2_vtht, mdpl2_vphi) = (
+        get_mdpl2_halo_cat(halo_cat_fname)
+    )
 
     # --- select clusters to mask ---
     if m500c_threshold != -1:
         clus_inds = np.where(mdpl2_m500c >= m500c_threshold)[0]
     else:
         assert cluster_lmz_dic is not None and expname is not None
-        redshifts = cluster_lmz_dic['redshift']
+        redshifts = cluster_lmz_dic["redshift"]
         dz = np.diff(redshifts)[0]
-        lim_M500c = cluster_lmz_dic['M500c'] * 1e14
+        lim_M500c = cluster_lmz_dic["M500c"] * 1e14
         clus_inds = []
         inds = np.where(mdpl2_z < redshifts[0])[0]
         clus_inds.extend(inds[mdpl2_m500c[inds] > lim_M500c[0]])
@@ -301,14 +332,15 @@ def get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname,
             clus_inds.extend(inds[passed])
         clus_inds = np.asarray(clus_inds)
 
-    print(f'\tTotal clusters to mask: {len(clus_inds)}')
+    print(f"\tTotal clusters to mask: {len(clus_inds)}")
 
     # --- optionally compute θ_500c-based radii ---
     if howmanythetaforclusters > 0:
         try:
-            from colossus.halo import concentration, mass_defs
             from colossus.cosmology import cosmology as colossus_cosmology
-            colossus_cosmology.setCosmology('planck15')
+            from colossus.halo import concentration, mass_defs
+
+            colossus_cosmology.setCosmology("planck15")
         except ImportError:
             raise ImportError("colossus is required for θ_500c-based masking.")
 
@@ -317,66 +349,65 @@ def get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname,
         for cntr, iii in enumerate(clus_inds):
             if cntr % 1000 == 0:
                 print(cntr)
-            c500c = concentration.concentration(mdpl2_m500c[iii], '500c', mdpl2_z[iii])
+            c500c = concentration.concentration(mdpl2_m500c[iii], "500c", mdpl2_z[iii])
             _, r500c, _ = mass_defs.changeMassDefinition(
-                mdpl2_m500c[iii], c500c, mdpl2_z[iii], '500c', '500c', profile='nfw')
+                mdpl2_m500c[iii], c500c, mdpl2_z[iii], "500c", "500c", profile="nfw"
+            )
             r500c_mpc = r500c / 1e3
-            ang_dia_dist = cosmo.comoving_distance(mdpl2_z[iii]) / (1. + mdpl2_z[iii])
-            theta500c_am = np.degrees(r500c_mpc / ang_dia_dist.value) * 60.
-            cluster_mask_radius_am_arr.append(
-                int(theta500c_am * howmanythetaforclusters) + 1)
+            ang_dia_dist = cosmo.comoving_distance(mdpl2_z[iii]) / (1.0 + mdpl2_z[iii])
+            theta500c_am = np.degrees(r500c_mpc / ang_dia_dist.value) * 60.0
+            cluster_mask_radius_am_arr.append(int(theta500c_am * howmanythetaforclusters) + 1)
 
         arr = np.asarray(cluster_mask_radius_am_arr, dtype=float)
         arr_mod = np.zeros_like(arr)
-        arr_mod[arr <= 5.] = 5.
-        arr_mod[(arr > 5.) & (arr <= 10.)] = 8.
-        arr_mod[(arr > 10.) & (arr <= 20.)] = 15.
-        arr_mod[(arr > 20.) & (arr <= 50.)] = 35.
-        arr_mod[(arr > 50.) & (arr <= 100.)] = 75.
-        arr_mod[arr > 100.] = 100.
+        arr_mod[arr <= 5.0] = 5.0
+        arr_mod[(arr > 5.0) & (arr <= 10.0)] = 8.0
+        arr_mod[(arr > 10.0) & (arr <= 20.0)] = 15.0
+        arr_mod[(arr > 20.0) & (arr <= 50.0)] = 35.0
+        arr_mod[(arr > 50.0) & (arr <= 100.0)] = 75.0
+        arr_mod[arr > 100.0] = 100.0
         cluster_mask_radius_am_arr = arr_mod
 
     # --- build per-radius binary masks ---
     # Original implementation
-    #npix = hp.nside2npix(nside)
-    #hmask_dic = {}
-    #for cntr, iii in enumerate(clus_inds):
-        #if cntr % 5000 == 0:
-            #print(cntr)
-        #ppp = hp.ang2pix(nside,
-                         #np.radians(90. - mdpl2_dec[iii]),
-                         #np.radians(mdpl2_ra[iii]))
-        #if howmanythetaforclusters > 0:
-            #r_am = cluster_mask_radius_am_arr[cntr]
-        #else:
-            #r_am = get_cluster_mask_radius(mdpl2_m500c[iii])
+    # npix = hp.nside2npix(nside)
+    # hmask_dic = {}
+    # for cntr, iii in enumerate(clus_inds):
+    # if cntr % 5000 == 0:
+    # print(cntr)
+    # ppp = hp.ang2pix(nside,
+    # np.radians(90. - mdpl2_dec[iii]),
+    # np.radians(mdpl2_ra[iii]))
+    # if howmanythetaforclusters > 0:
+    # r_am = cluster_mask_radius_am_arr[cntr]
+    # else:
+    # r_am = get_cluster_mask_radius(mdpl2_m500c[iii])
 
-        #ivec = hp.pix2vec(nside, ppp)
-        #disc = hp.query_disc(nside, ivec, np.deg2rad(r_am / 60.))
-        #if r_am not in hmask_dic:
-            #hmask_dic[r_am] = np.ones(npix)
-        #hmask_dic[r_am][disc] = 0.
+    # ivec = hp.pix2vec(nside, ppp)
+    # disc = hp.query_disc(nside, ivec, np.deg2rad(r_am / 60.))
+    # if r_am not in hmask_dic:
+    # hmask_dic[r_am] = np.ones(npix)
+    # hmask_dic[r_am][disc] = 0.
 
     # --- build combined binary mask directly ---
     # Memory-friendly approach
     import gc
+
     npix = hp.nside2npix(nside)
     combined_mask = np.ones(npix, dtype=np.float32)
 
     for cntr, iii in enumerate(clus_inds):
         if cntr % 5000 == 0:
             print(cntr)
-        ppp = hp.ang2pix(nside,
-                         np.radians(90. - mdpl2_dec[iii]),
-                         np.radians(mdpl2_ra[iii]))
+        ppp = hp.ang2pix(nside, np.radians(90.0 - mdpl2_dec[iii]), np.radians(mdpl2_ra[iii]))
         if howmanythetaforclusters > 0:
             r_am = cluster_mask_radius_am_arr[cntr]
         else:
             r_am = get_cluster_mask_radius(mdpl2_m500c[iii])
 
         ivec = hp.pix2vec(nside, ppp)
-        disc = hp.query_disc(nside, ivec, np.deg2rad(r_am / 60.))
-        combined_mask[disc] = 0.
+        disc = hp.query_disc(nside, ivec, np.deg2rad(r_am / 60.0))
+        combined_mask[disc] = 0.0
 
     del mdpl2_ra, mdpl2_dec, mdpl2_z, mdpl2_m200c, mdpl2_m500c
     del mdpl2_vlos, mdpl2_vtht, mdpl2_vphi, clus_inds
@@ -387,14 +418,15 @@ def get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname,
 
     # Memory-friendly Gaussian smoothing approach
     if apodise:
-        apod_fwhm_rad = np.radians(15. / 60.)  # 15 arcmin apodisation
+        apod_fwhm_rad = np.radians(15.0 / 60.0)  # 15 arcmin apodisation
         # Smooth the binary mask with a Gaussian — values taper from 1 to 0 near edges
-        final_hmask = hp.smoothing(combined_mask, fwhm=apod_fwhm_rad, 
-                                   lmax=2*nside).astype(np.float32)
+        final_hmask = hp.smoothing(combined_mask, fwhm=apod_fwhm_rad, lmax=2 * nside).astype(
+            np.float32
+        )
         del combined_mask
         gc.collect()
         # Clip: smoothing can produce small negative values at sharp edges
-        final_hmask = np.clip(final_hmask, 0., 1.)
+        final_hmask = np.clip(final_hmask, 0.0, 1.0)
         final_hmask /= final_hmask.max()
     else:
         final_hmask = combined_mask
@@ -402,22 +434,22 @@ def get_apodised_mdpl2_cluster_mask(nside, halo_cat_fname,
     return final_hmask  # this line was missing
 
     # Original implementation --------------------
-    #if apodise:
-        #hmask_smoothed_dic = {}
-        #for r_am in sorted(hmask_dic):
-            #apod_angle_am = 10. if r_am <= 10. else 20.
-            #apod_angle = np.radians(apod_angle_am / 60.)
-            #dist_smooth_angle = np.radians(r_am / 60.)
-            #apod_start_dist = 0.
-            #apod_end_dist = apod_start_dist + apod_angle
+    # if apodise:
+    # hmask_smoothed_dic = {}
+    # for r_am in sorted(hmask_dic):
+    # apod_angle_am = 10. if r_am <= 10. else 20.
+    # apod_angle = np.radians(apod_angle_am / 60.)
+    # dist_smooth_angle = np.radians(r_am / 60.)
+    # apod_start_dist = 0.
+    # apod_end_dist = apod_start_dist + apod_angle
 
-            #curr = hmask_dic[r_am]
-            #curr_smoothed = apodize_binary_mask_prof(
-                #curr, dist_smooth_angle, apod_start_dist, apod_end_dist)
-            #hmask_smoothed_dic[r_am] = curr_smoothed / np.max(curr_smoothed)
-    #else:
-        #hmask_smoothed_dic = copy.deepcopy(hmask_dic)
+    # curr = hmask_dic[r_am]
+    # curr_smoothed = apodize_binary_mask_prof(
+    # curr, dist_smooth_angle, apod_start_dist, apod_end_dist)
+    # hmask_smoothed_dic[r_am] = curr_smoothed / np.max(curr_smoothed)
+    # else:
+    # hmask_smoothed_dic = copy.deepcopy(hmask_dic)
 
-    #final_hmask = np.prod(list(hmask_smoothed_dic.values()), axis=0)
-    #final_hmask /= np.max(final_hmask)
-    #return final_hmask
+    # final_hmask = np.prod(list(hmask_smoothed_dic.values()), axis=0)
+    # final_hmask /= np.max(final_hmask)
+    # return final_hmask

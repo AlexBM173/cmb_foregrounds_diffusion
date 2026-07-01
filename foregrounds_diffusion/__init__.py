@@ -39,8 +39,13 @@ sample
 """
 
 from foregrounds_diffusion import (
-    flatmaps, preprocessing, statistics,
-    moments, morphology, stacking, masking,
+    flatmaps,
+    masking,
+    moments,
+    morphology,
+    preprocessing,
+    stacking,
+    statistics,
 )
 
 __all__ = [

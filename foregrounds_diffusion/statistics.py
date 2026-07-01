@@ -1,10 +1,10 @@
 import numpy as np
 from scipy import optimize
 
-
 # ---------------------------------------------------------------------------
 # Gaussian fitting
 # ---------------------------------------------------------------------------
+
 
 def gaussian(height, center_x, center_y, width_x, width_y):
     """Return a 2D Gaussian function with the given parameters.
@@ -25,9 +25,9 @@ def gaussian(height, center_x, center_y, width_x, width_y):
     """
     width_x = float(width_x)
     width_y = float(width_y)
-    return lambda x, y: height * np.exp(
-        -(((center_x - x) / width_x) ** 2
-          + ((center_y - y) / width_y) ** 2) / 2)
+    return lambda x, y: (
+        height * np.exp(-(((center_x - x) / width_x) ** 2 + ((center_y - y) / width_y) ** 2) / 2)
+    )
 
 
 def moments(data):
@@ -69,14 +69,15 @@ def fitgaussian(data):
         ``(height, x, y, width_x, width_y)`` — best-fit parameters.
     """
     params = moments(data)
-    errorfunction = lambda p: np.ravel(
-        gaussian(*p)(*np.indices(data.shape)) - data)
+
+    def errorfunction(p):
+        return np.ravel(gaussian(*p)(*np.indices(data.shape)) - data)
+
     p, _ = optimize.leastsq(errorfunction, params)
     return p
 
 
-def fitting_func(p, p0, xgrid, ygrid, tmap,
-                 lbounds=None, ubounds=None, fixed=None, return_fit=0):
+def fitting_func(p, p0, xgrid, ygrid, tmap, lbounds=None, ubounds=None, fixed=None, return_fit=0):
     """Evaluate or fit a 2D Gaussian model on a pixel grid.
 
     Used internally by :func:`~foregrounds_diffusion.preprocessing.get_mask_using_gaussian_fitting`.
@@ -103,16 +104,16 @@ def fitting_func(p, p0, xgrid, ygrid, tmap,
     ndarray
         Residual vector (when ``return_fit=0``) or model image (when ``return_fit=1``).
     """
-    if hasattr(fixed, '__len__'):
+    if hasattr(fixed, "__len__"):
         p[fixed] = p0[fixed]
 
-    if hasattr(lbounds, '__len__'):
+    if hasattr(lbounds, "__len__"):
         linds = abs(p) < abs(lbounds)
         if len(linds) > 0:
             return tmap
         p[linds] = lbounds[linds]
 
-    if hasattr(ubounds, '__len__'):
+    if hasattr(ubounds, "__len__"):
         uinds = abs(p) > abs(ubounds)
         if len(uinds) > 0:
             return tmap
@@ -122,14 +123,13 @@ def fitting_func(p, p0, xgrid, ygrid, tmap,
         if len(p) > 6:
             wx, wy = p[4], p[5]
             rota = np.radians(p[6])
-            xp_rot = np.radians(xp / 60.) * np.cos(rota) - np.radians(yp / 60.) * np.sin(rota)
-            yp_rot = np.radians(xp / 60.) * np.sin(rota) + np.radians(yp / 60.) * np.cos(rota)
-            xp = np.degrees(xp_rot) * 60.
-            yp = np.degrees(yp_rot) * 60.
+            xp_rot = np.radians(xp / 60.0) * np.cos(rota) - np.radians(yp / 60.0) * np.sin(rota)
+            yp_rot = np.radians(xp / 60.0) * np.sin(rota) + np.radians(yp / 60.0) * np.cos(rota)
+            xp = np.degrees(xp_rot) * 60.0
+            yp = np.degrees(yp_rot) * 60.0
         else:
             wx = wy = p[4]
-        return p[0] + p[1] * np.exp(
-            -(((p[2] - xp) / wx) ** 2 + ((p[3] - yp) / wy) ** 2) / 2.)
+        return p[0] + p[1] * np.exp(-(((p[2] - xp) / wx) ** 2 + ((p[3] - yp) / wy) ** 2) / 2.0)
 
     if not return_fit:
         return np.ravel(_gaussian(p, xgrid, ygrid) - tmap)
@@ -140,6 +140,7 @@ def fitting_func(p, p0, xgrid, ygrid, tmap,
 # ---------------------------------------------------------------------------
 # Summary statistics
 # ---------------------------------------------------------------------------
+
 
 def stats(maps):
     """Return (min, max, mean, std) of an array.

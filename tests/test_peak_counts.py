@@ -11,10 +11,10 @@ from foregrounds_diffusion.peak_counts import (
     smooth_map,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def rng():
@@ -34,6 +34,7 @@ def patch_stack(rng):
 # ---------------------------------------------------------------------------
 # smooth_map
 # ---------------------------------------------------------------------------
+
 
 def test_smooth_map_preserves_shape(patch):
     out = smooth_map(patch, fwhm_arcmin=5.0)
@@ -59,6 +60,7 @@ def test_smooth_map_large_fwhm_nearly_constant(patch):
 # find_peaks
 # ---------------------------------------------------------------------------
 
+
 def test_find_peaks_returns_1d(patch):
     peaks = find_peaks(patch)
     assert peaks.ndim == 1
@@ -70,7 +72,7 @@ def test_find_peaks_all_are_local_maxima(patch):
     # Every returned value should equal the local maximum in its neighbourhood.
     local_max = maximum_filter(smoothed, size=3)
     # Each returned value must appear at a position where smoothed == local_max.
-    peak_positions = (local_max == smoothed)
+    peak_positions = local_max == smoothed
     border = 1
     peak_positions[:border, :] = False
     peak_positions[-border:, :] = False
@@ -99,6 +101,7 @@ def test_find_peaks_single_spike():
 # find_minima
 # ---------------------------------------------------------------------------
 
+
 def test_find_minima_returns_1d(patch):
     minima = find_minima(patch)
     assert minima.ndim == 1
@@ -108,7 +111,7 @@ def test_find_minima_all_are_local_minima(patch):
     smoothed = smooth_map(patch, fwhm_arcmin=5.0)
     minima = find_minima(smoothed, filter_size=3)
     local_min = minimum_filter(smoothed, size=3)
-    min_positions = (local_min == smoothed)
+    min_positions = local_min == smoothed
     border = 1
     min_positions[:border, :] = False
     min_positions[-border:, :] = False
@@ -128,6 +131,7 @@ def test_find_minima_single_dip():
 # ---------------------------------------------------------------------------
 # count_peaks_binned
 # ---------------------------------------------------------------------------
+
 
 def test_count_peaks_binned_shape(patch_stack):
     thresholds = np.linspace(-3, 3, 15)
@@ -160,6 +164,7 @@ def test_count_peaks_binned_zero_std_map_handled():
 # count_minima_binned
 # ---------------------------------------------------------------------------
 
+
 def test_count_minima_binned_shape(patch_stack):
     thresholds = np.linspace(-4, 0, 10)
     counts = count_minima_binned(patch_stack, thresholds, fwhm_arcmin=5.0)
@@ -184,17 +189,18 @@ def test_count_minima_binned_increasing_with_threshold(patch_stack):
 # compute_peak_minima_counts
 # ---------------------------------------------------------------------------
 
+
 def test_compute_peak_minima_counts_structure(patch_stack):
     thresholds_p = np.linspace(-1, 4, 10)
     thresholds_m = np.linspace(-4, 1, 10)
     scales = (2.0, 5.0)
     results = compute_peak_minima_counts(
-        patch_stack, thresholds_p, thresholds_m,
-        smoothing_scales_arcmin=scales)
+        patch_stack, thresholds_p, thresholds_m, smoothing_scales_arcmin=scales
+    )
     assert set(results.keys()) == set(scales)
     for fwhm in scales:
-        assert 'peaks' in results[fwhm]
-        assert 'minima' in results[fwhm]
+        assert "peaks" in results[fwhm]
+        assert "minima" in results[fwhm]
 
 
 def test_compute_peak_minima_counts_shapes(patch_stack):
@@ -202,7 +208,7 @@ def test_compute_peak_minima_counts_shapes(patch_stack):
     thresholds_m = np.linspace(-4, 1, 8)
     N = len(patch_stack)
     results = compute_peak_minima_counts(
-        patch_stack, thresholds_p, thresholds_m,
-        smoothing_scales_arcmin=(3.0,))
-    assert results[3.0]['peaks'].shape == (N, 12)
-    assert results[3.0]['minima'].shape == (N, 8)
+        patch_stack, thresholds_p, thresholds_m, smoothing_scales_arcmin=(3.0,)
+    )
+    assert results[3.0]["peaks"].shape == (N, 12)
+    assert results[3.0]["minima"].shape == (N, 8)

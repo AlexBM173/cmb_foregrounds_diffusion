@@ -1,9 +1,9 @@
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # tSZ cluster stacking utilities
 # ---------------------------------------------------------------------------
+
 
 def select_snr_pixels(tsz_maps_nhw, snr_min, snr_max, min_separation=5):
     """Find local SNR-peak coordinates within a given SNR bin.
@@ -24,6 +24,7 @@ def select_snr_pixels(tsz_maps_nhw, snr_min, snr_max, min_separation=5):
         Each element is ``(patch_idx, row, col)``.
     """
     from scipy.ndimage import maximum_filter
+
     coords = []
     for i, m in enumerate(tsz_maps_nhw):
         noise = m.std()
@@ -33,7 +34,7 @@ def select_snr_pixels(tsz_maps_nhw, snr_min, snr_max, min_separation=5):
         local_max = maximum_filter(snr_map, size=min_separation) == snr_map
         in_bin = (snr_map >= snr_min) & local_max
         if snr_max is not None:
-            in_bin &= (snr_map < snr_max)
+            in_bin &= snr_map < snr_max
         for ri, rj in np.argwhere(in_bin):
             coords.append((i, int(ri), int(rj)))
     print(f"SNR [{snr_min}, {snr_max}): {len(coords)} peaks found")

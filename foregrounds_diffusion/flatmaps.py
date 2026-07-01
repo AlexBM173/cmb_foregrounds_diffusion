@@ -1,9 +1,9 @@
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Fourier-space grid helpers
 # ---------------------------------------------------------------------------
+
 
 def get_lxly(flatskymapparams):
     """Return 2D Fourier wavenumber grids lx and ly.
@@ -21,8 +21,8 @@ def get_lxly(flatskymapparams):
         2D arrays of Fourier wavenumbers.
     """
     nx, ny, dx, dy = flatskymapparams
-    dx = np.radians(dx / 60.)
-    dy = np.radians(dy / 60.)
+    dx = np.radians(dx / 60.0)
+    dy = np.radians(dy / 60.0)
     lx, ly = np.meshgrid(np.fft.fftfreq(nx, dx), np.fft.fftfreq(ny, dy))
     lx *= 2 * np.pi
     ly *= 2 * np.pi
@@ -44,11 +44,13 @@ def get_lxly_az_angle(lx, ly):
     """
     return 2 * np.arctan2(lx, -ly)
 
+
 # ---------------------------------------------------------------------------
 # Get low, high, or band pass filter in Fourier space
 # ---------------------------------------------------------------------------
 
-def get_lpf_hpf(flatskymapparams, lmin_lmax, filter_type = 0):
+
+def get_lpf_hpf(flatskymapparams, lmin_lmax, filter_type=0):
     """
     filter_type = 0 - low pass filter
     filter_type = 1 - high pass filter
@@ -56,16 +58,16 @@ def get_lpf_hpf(flatskymapparams, lmin_lmax, filter_type = 0):
     """
 
     lx, ly = get_lxly(flatskymapparams)
-    ell = np.sqrt(lx**2. + ly**2.)
+    ell = np.sqrt(lx**2.0 + ly**2.0)
     fft_filter = np.ones(ell.shape)
     if filter_type == 0:
-        fft_filter[ell>lmin_lmax] = 0.
+        fft_filter[ell > lmin_lmax] = 0.0
     elif filter_type == 1:
-        fft_filter[ell<lmin_lmax] = 0.
+        fft_filter[ell < lmin_lmax] = 0.0
     elif filter_type == 2:
         lmin, lmax = lmin_lmax
-        fft_filter[ell<lmin] = 0.
-        fft_filter[ell>lmax] = 0
+        fft_filter[ell < lmin] = 0.0
+        fft_filter[ell > lmax] = 0
 
     return fft_filter
 
@@ -88,9 +90,11 @@ def bandpass_filter(fmap, bp):
     """
     return np.fft.ifft2(np.fft.fft2(fmap) * bp).real
 
+
 # ---------------------------------------------------------------------------
 # Power-spectrum ↔ map conversion
 # ---------------------------------------------------------------------------
+
 
 def cl_to_cl2d(el, cl, flatskymapparams):
     """Interpolate a 1D power spectrum onto a 2D Fourier grid.
@@ -110,7 +114,7 @@ def cl_to_cl2d(el, cl, flatskymapparams):
         2D power spectrum on the Fourier grid.
     """
     lx, ly = get_lxly(flatskymapparams)
-    ell = np.sqrt(lx ** 2. + ly ** 2.)
+    ell = np.sqrt(lx**2.0 + ly**2.0)
     cl2d = np.interp(ell.flatten(), el, cl).reshape(ell.shape)
     return cl2d
 
@@ -134,17 +138,24 @@ def _build_ell_bin_cache(flatskymapparams, binsize=None, minbin=100, maxbin=1000
     """
     lx, ly = get_lxly(flatskymapparams)
     if binsize is None:
-        binsize   = float(lx.ravel()[1] - lx.ravel()[0])
-    binarr    = np.arange(minbin, maxbin, binsize)
-    ell_flat  = np.sqrt(lx ** 2 + ly ** 2).ravel()
-    bin_idx   = np.digitize(ell_flat, binarr) - 1
+        binsize = float(lx.ravel()[1] - lx.ravel()[0])
+    binarr = np.arange(minbin, maxbin, binsize)
+    ell_flat = np.sqrt(lx**2 + ly**2).ravel()
+    bin_idx = np.digitize(ell_flat, binarr) - 1
     upper_edge = float(binarr[-1]) + binsize
     valid_ell = (bin_idx >= 0) & (bin_idx < len(binarr)) & (ell_flat < upper_edge)
     return binarr, bin_idx, valid_ell, float(binsize)
 
 
-def map2cl(flatskymapparams, flatskymap1, flatskymap2=None,
-           binsize=None, minbin=100, maxbin=10000, _ell_bin_cache=None):
+def map2cl(
+    flatskymapparams,
+    flatskymap1,
+    flatskymap2=None,
+    binsize=None,
+    minbin=100,
+    maxbin=10000,
+    _ell_bin_cache=None,
+):
     """Compute auto- or cross-power spectrum of flat-sky map(s).
 
     Parameters
@@ -171,7 +182,7 @@ def map2cl(flatskymapparams, flatskymap1, flatskymap2=None,
         Binned multipoles and power spectrum.
     """
     nx, ny, dx, dy = flatskymapparams
-    dx_rad = np.radians(dx / 60.)
+    dx_rad = np.radians(dx / 60.0)
     flatskymap1 = np.ascontiguousarray(flatskymap1)
 
     if _ell_bin_cache is not None:
@@ -179,10 +190,10 @@ def map2cl(flatskymapparams, flatskymap1, flatskymap2=None,
     else:
         lx, ly = get_lxly(flatskymapparams)
         if binsize is None:
-            binsize   = float(lx.ravel()[1] - lx.ravel()[0])
-        binarr    = np.arange(minbin, maxbin, binsize)
-        ell_flat  = np.sqrt(lx ** 2 + ly ** 2).ravel()
-        bin_idx   = np.digitize(ell_flat, binarr) - 1
+            binsize = float(lx.ravel()[1] - lx.ravel()[0])
+        binarr = np.arange(minbin, maxbin, binsize)
+        ell_flat = np.sqrt(lx**2 + ly**2).ravel()
+        bin_idx = np.digitize(ell_flat, binarr) - 1
         upper_edge = float(binarr[-1]) + binsize
         valid_ell = (bin_idx >= 0) & (bin_idx < len(binarr)) & (ell_flat < upper_edge)
 
@@ -191,22 +202,24 @@ def map2cl(flatskymapparams, flatskymap1, flatskymap2=None,
     else:
         flatskymap2 = np.ascontiguousarray(flatskymap2)
         assert flatskymap1.shape == flatskymap2.shape
-        flatskymap_psd = (np.fft.fft2(flatskymap1) * dx_rad
-                         * np.conj(np.fft.fft2(flatskymap2)) * dx_rad
-                         / (nx * ny))
+        flatskymap_psd = (
+            np.fft.fft2(flatskymap1)
+            * dx_rad
+            * np.conj(np.fft.fft2(flatskymap2))
+            * dx_rad
+            / (nx * ny)
+        )
 
     # Vectorised binning: np.bincount replaces the O(B × H²) Python loop
     # in the legacy radial_profile.  valid_ell is pre-computed by the cache
     # and masks pixels outside [minbin, last_bin_upper_edge).
     psd_flat = flatskymap_psd.ravel()
-    nonzero  = np.abs(psd_flat) > 0
-    valid    = valid_ell & nonzero
-    hits     = np.bincount(bin_idx[valid], minlength=len(binarr)).astype(float)
-    cl_sum   = np.bincount(bin_idx[valid],
-                           weights=np.real(psd_flat[valid]),
-                           minlength=len(binarr))
-    cl       = np.where(hits > 0, cl_sum / hits, 0.0)
-    el       = binarr + binsize / 2.
+    nonzero = np.abs(psd_flat) > 0
+    valid = valid_ell & nonzero
+    hits = np.bincount(bin_idx[valid], minlength=len(binarr)).astype(float)
+    cl_sum = np.bincount(bin_idx[valid], weights=np.real(psd_flat[valid]), minlength=len(binarr))
+    cl = np.where(hits > 0, cl_sum / hits, 0.0)
+    el = binarr + binsize / 2.0
     return el, cl
 
 
@@ -235,8 +248,8 @@ def cl2map(flatskymapparams, cl, el=None):
     nx, ny, dx, dy = flatskymapparams
     cl2d = cl_to_cl2d(el, cl, flatskymapparams)
 
-    dx_rad = np.radians(dx / 60.)
-    pix_area_norm = np.sqrt(1. / dx_rad ** 2.)
+    dx_rad = np.radians(dx / 60.0)
+    pix_area_norm = np.sqrt(1.0 / dx_rad**2.0)
     cl2d_sqrt_normed = np.sqrt(cl2d) * pix_area_norm
 
     gauss_reals = np.random.randn(nx, ny)
@@ -245,8 +258,7 @@ def cl2map(flatskymapparams, cl, el=None):
     return flatskymap
 
 
-def make_gaussian_realisation(mapparams, el, cl, cl2=None, cl12=None,
-                              bl=None, qu_or_eb='qu'):
+def make_gaussian_realisation(mapparams, el, cl, cl2=None, cl12=None, bl=None, qu_or_eb="qu"):
     """Generate a (possibly correlated two-field) Gaussian flat-sky realisation.
 
     Parameters
@@ -272,9 +284,9 @@ def make_gaussian_realisation(mapparams, el, cl, cl2=None, cl12=None,
         Simulated map (1D or 3-component array for polarisation).
     """
     nx, ny, dx, dy = mapparams
-    dx = dx * np.radians(1 / 60.)
-    dy = dy * np.radians(1 / 60.)
-    norm = np.sqrt(1. / (dx * dy))
+    dx = dx * np.radians(1 / 60.0)
+    dy = dy * np.radians(1 / 60.0)
+    norm = np.sqrt(1.0 / (dx * dy))
 
     cltwod = cl_to_cl2d(el, cl, mapparams)
 
@@ -284,13 +296,13 @@ def make_gaussian_realisation(mapparams, el, cl, cl2=None, cl12=None,
         cltwod2 = cl_to_cl2d(el, cl2, mapparams)
 
     if cl2 is None:
-        cltwod = cltwod ** 0.5 * norm
-        cltwod[np.isnan(cltwod)] = 0.
+        cltwod = cltwod**0.5 * norm
+        cltwod[np.isnan(cltwod)] = 0.0
         gauss_reals = np.random.standard_normal([nx, ny])
         SIM = np.fft.ifft2(np.copy(cltwod) * np.fft.fft2(gauss_reals)).real
     else:
-        cltwod12[np.isnan(cltwod12)] = 0.
-        cltwod2[np.isnan(cltwod2)] = 0.
+        cltwod12[np.isnan(cltwod12)] = 0.0
+        cltwod2[np.isnan(cltwod2)] = 0.0
 
         gauss_reals_1_fft = np.fft.fft2(np.random.standard_normal([nx, ny]))
         gauss_reals_2_fft = np.fft.fft2(np.random.standard_normal([nx, ny]))
@@ -299,16 +311,16 @@ def make_gaussian_realisation(mapparams, el, cl, cl2=None, cl12=None,
         SIM_FIELD_1 = np.fft.ifft2(cltwod_tmp * gauss_reals_1_fft).real
 
         t1 = np.copy(gauss_reals_1_fft) * cltwod12 / np.copy(cltwod) ** 0.5
-        t2 = (np.copy(gauss_reals_2_fft)
-              * (cltwod2 - cltwod12 ** 2. / np.copy(cltwod)) ** 0.5)
+        t2 = np.copy(gauss_reals_2_fft) * (cltwod2 - cltwod12**2.0 / np.copy(cltwod)) ** 0.5
         SIM_FIELD_2_FFT = (t1 + t2) * norm
-        SIM_FIELD_2_FFT[np.isnan(SIM_FIELD_2_FFT)] = 0.
+        SIM_FIELD_2_FFT[np.isnan(SIM_FIELD_2_FFT)] = 0.0
         SIM_FIELD_2 = np.fft.ifft2(SIM_FIELD_2_FFT).real
 
         SIM_FIELD_3 = np.zeros(SIM_FIELD_2.shape)
-        if qu_or_eb == 'qu':
+        if qu_or_eb == "qu":
             SIM_FIELD_2, SIM_FIELD_3 = convert_eb_qu(
-                SIM_FIELD_2, SIM_FIELD_3, mapparams, eb_to_qu=1)
+                SIM_FIELD_2, SIM_FIELD_3, mapparams, eb_to_qu=1
+            )
 
         SIM = np.asarray([SIM_FIELD_1, SIM_FIELD_2, SIM_FIELD_3])
 
@@ -324,6 +336,7 @@ def make_gaussian_realisation(mapparams, el, cl, cl2=None, cl12=None,
 # ---------------------------------------------------------------------------
 # Polarisation rotation helper
 # ---------------------------------------------------------------------------
+
 
 def convert_eb_qu(map1, map2, flatskymapparams, eb_to_qu=1):
     """Convert between E/B and Q/U polarisation representations.
@@ -358,8 +371,8 @@ def convert_eb_qu(map1, map2, flatskymapparams, eb_to_qu=1):
 # Profile estimation
 # ---------------------------------------------------------------------------
 
-def radial_profile(z, xy=None, bin_size=1., minbin=0., maxbin=10.,
-                   to_arcmins=1):
+
+def radial_profile(z, xy=None, bin_size=1.0, minbin=0.0, maxbin=10.0, to_arcmins=1):
     """Compute the radial profile of a real- or Fourier-space image.
 
     Parameters
@@ -386,9 +399,9 @@ def radial_profile(z, xy=None, bin_size=1., minbin=0., maxbin=10.,
     else:
         x, y = xy
 
-    radius = (x ** 2. + y ** 2.) ** 0.5
+    radius = (x**2.0 + y**2.0) ** 0.5
     if to_arcmins:
-        radius *= 60.
+        radius *= 60.0
 
     binarr = np.arange(minbin, maxbin, bin_size)
     radprf = np.zeros((len(binarr), 3))
@@ -396,8 +409,8 @@ def radial_profile(z, xy=None, bin_size=1., minbin=0., maxbin=10.,
 
     for b, bin_lo in enumerate(binarr):
         ind = np.where((radius >= bin_lo) & (radius < bin_lo + bin_size))
-        radprf[b, 0] = bin_lo + bin_size / 2.
-        hits = len(np.where(abs(z[ind]) > 0.)[0])
+        radprf[b, 0] = bin_lo + bin_size / 2.0
+        hits = len(np.where(abs(z[ind]) > 0.0)[0])
         if hits > 0:
             radprf[b, 1] = np.real(np.sum(z[ind]) / hits)
             radprf[b, 2] = np.std(np.real(z[ind]))
@@ -405,6 +418,6 @@ def radial_profile(z, xy=None, bin_size=1., minbin=0., maxbin=10.,
 
     hit_count = np.asarray(hit_count)
     std_mean = np.sum(radprf[:, 2] * hit_count) / np.sum(hit_count)
-    errval = std_mean / hit_count ** 0.5
+    errval = std_mean / hit_count**0.5
     radprf[:, 2] = errval
     return radprf

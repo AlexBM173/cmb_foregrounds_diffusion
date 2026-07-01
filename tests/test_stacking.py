@@ -3,10 +3,10 @@ import pytest
 
 from foregrounds_diffusion.stacking import extract_cutouts, select_snr_pixels
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def rng():
@@ -30,6 +30,7 @@ def maps_with_peak(noise_maps):
 # ---------------------------------------------------------------------------
 # select_snr_pixels
 # ---------------------------------------------------------------------------
+
 
 def test_select_snr_pixels_returns_list_of_tuples(maps_with_peak):
     coords = select_snr_pixels(maps_with_peak, snr_min=3, snr_max=None)
@@ -76,6 +77,7 @@ def test_select_snr_pixels_coords_in_bounds(maps_with_peak):
 # extract_cutouts
 # ---------------------------------------------------------------------------
 
+
 def test_extract_cutouts_shape(maps_with_peak):
     coords = [(2, 16, 16)]
     cutouts = extract_cutouts(maps_with_peak, coords, cutout_size=8)
@@ -116,5 +118,5 @@ def test_extract_cutouts_values_match_source(maps_with_peak):
     half = size // 2
     coords = [(2, ri, rj)]
     cutouts = extract_cutouts(maps_with_peak, coords, cutout_size=size)
-    expected = maps_with_peak[2, ri - half:ri + half, rj - half:rj + half]
+    expected = maps_with_peak[2, ri - half : ri + half, rj - half : rj + half]
     np.testing.assert_allclose(cutouts[0], expected.astype(np.float32))

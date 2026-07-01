@@ -4,6 +4,7 @@ HEALPix functions (get_point_source_mask_in_healpix,
 get_apodised_mdpl2_cluster_mask, get_mdpl2_halo_cat, …) require external
 data files on the cluster and are not tested here.
 """
+
 import numpy as np
 import pytest
 
@@ -13,10 +14,10 @@ from foregrounds_diffusion.masking import (
     inpaint_masked_regions,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def rng():
@@ -41,6 +42,7 @@ def map_with_spike(smooth_map):
 # get_peak_masks
 # ---------------------------------------------------------------------------
 
+
 def test_get_peak_masks_returns_two_arrays(smooth_map):
     peak_mask, mask = get_peak_masks(smooth_map, mask_threshold_sigma_units=10)
     assert peak_mask.shape == smooth_map.shape
@@ -48,8 +50,9 @@ def test_get_peak_masks_returns_two_arrays(smooth_map):
 
 
 def test_get_peak_masks_values_zero_or_one_no_apod(smooth_map):
-    peak_mask, _ = get_peak_masks(smooth_map, mask_threshold_sigma_units=10,
-                                   mask_radius_pixel_units=0)
+    peak_mask, _ = get_peak_masks(
+        smooth_map, mask_threshold_sigma_units=10, mask_radius_pixel_units=0
+    )
     assert set(np.unique(peak_mask)) <= {0.0, 1.0}
 
 
@@ -66,23 +69,31 @@ def test_get_peak_masks_spike_is_masked(map_with_spike):
 
 
 def test_get_peak_masks_circle_radius_punches_hole(map_with_spike):
-    _, mask = get_peak_masks(map_with_spike, mask_threshold_sigma_units=10,
-                              mask_radius_pixel_units=3, mask_shape='circle',
-                              perform_apod=0)
+    _, mask = get_peak_masks(
+        map_with_spike,
+        mask_threshold_sigma_units=10,
+        mask_radius_pixel_units=3,
+        mask_shape="circle",
+        perform_apod=0,
+    )
     # The spike pixel itself is masked.
     assert mask[16, 16] == 0.0
 
 
 def test_get_peak_masks_square_radius_punches_hole(map_with_spike):
-    _, mask = get_peak_masks(map_with_spike, mask_threshold_sigma_units=10,
-                              mask_radius_pixel_units=3, mask_shape='square',
-                              perform_apod=0)
+    _, mask = get_peak_masks(
+        map_with_spike,
+        mask_threshold_sigma_units=10,
+        mask_radius_pixel_units=3,
+        mask_shape="square",
+        perform_apod=0,
+    )
     assert mask[16, 16] == 0.0
 
 
 def test_get_peak_masks_invalid_shape_raises():
     with pytest.raises(AssertionError):
-        get_peak_masks(np.ones((8, 8)), mask_shape='triangle')
+        get_peak_masks(np.ones((8, 8)), mask_shape="triangle")
 
 
 def test_get_peak_masks_negative_radius_raises():
@@ -93,6 +104,7 @@ def test_get_peak_masks_negative_radius_raises():
 # ---------------------------------------------------------------------------
 # inpaint_masked_regions
 # ---------------------------------------------------------------------------
+
 
 def test_inpaint_replaces_masked_pixels(rng):
     hmap = rng.standard_normal(64)
@@ -146,6 +158,7 @@ def test_inpaint_no_masked_pixels_is_identity(rng):
 # boundary_apod_mask
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def xy_grid():
     x, y = np.meshgrid(np.linspace(-1, 1, 32), np.linspace(-1, 1, 32))
@@ -160,8 +173,7 @@ def test_boundary_apod_mask_shape(xy_grid):
 
 def test_boundary_apod_circle_centre_masked(xy_grid):
     x, y = xy_grid
-    mask = boundary_apod_mask(x, y, mask_radius=0.3, mask_shape='circle',
-                               perform_apod=False)
+    mask = boundary_apod_mask(x, y, mask_radius=0.3, mask_shape="circle", perform_apod=False)
     # Centre of the grid (x≈0, y≈0) lies inside the circle: should be 0.
     cx, cy = mask.shape[0] // 2, mask.shape[1] // 2
     assert mask[cx, cy] == 0.0
@@ -169,8 +181,7 @@ def test_boundary_apod_circle_centre_masked(xy_grid):
 
 def test_boundary_apod_circle_edge_unmasked(xy_grid):
     x, y = xy_grid
-    mask = boundary_apod_mask(x, y, mask_radius=0.2, mask_shape='circle',
-                               perform_apod=False)
+    mask = boundary_apod_mask(x, y, mask_radius=0.2, mask_shape="circle", perform_apod=False)
     # Corner pixels (|r|>0.2) should be unmasked.
     assert mask[0, 0] == 1.0
     assert mask[-1, -1] == 1.0
@@ -178,8 +189,7 @@ def test_boundary_apod_circle_edge_unmasked(xy_grid):
 
 def test_boundary_apod_square_centre_masked(xy_grid):
     x, y = xy_grid
-    mask = boundary_apod_mask(x, y, mask_radius=0.3, mask_shape='square',
-                               perform_apod=False)
+    mask = boundary_apod_mask(x, y, mask_radius=0.3, mask_shape="square", perform_apod=False)
     cx, cy = mask.shape[0] // 2, mask.shape[1] // 2
     assert mask[cx, cy] == 0.0
 
@@ -187,7 +197,7 @@ def test_boundary_apod_square_centre_masked(xy_grid):
 def test_boundary_apod_invalid_shape_raises(xy_grid):
     x, y = xy_grid
     with pytest.raises(AssertionError):
-        boundary_apod_mask(x, y, mask_radius=0.3, mask_shape='hexagon')
+        boundary_apod_mask(x, y, mask_radius=0.3, mask_shape="hexagon")
 
 
 def test_boundary_apod_mask_values_in_unit_interval(xy_grid):

@@ -45,6 +45,24 @@ docs = ["sphinx>=7", "furo", "nbsphinx", "sphinx-copybutton",
 testpaths = ["tests"]
 markers = ["optional: mark test as optional (skipped when dep missing)"]
 
+[tool.ruff]
+line-length = 100
+exclude = ["foregrounds_diffusion/redundant/", "*.ipynb"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E741",   # ambiguous variable names (l, O, I) — common in maths/physics code
+    "E501",   # line too long — handled by formatter
+    "F811",   # redefinition of unused name — harmless in notebooks/scripts
+]
+
+[tool.mypy]
+ignore_missing_imports = true
+allow_untyped_defs = true
+allow_untyped_calls = true
+exclude = ["foregrounds_diffusion/redundant/"]
+
 [project.scripts]
 fd-sample = "foregrounds_diffusion.sample:main"
 

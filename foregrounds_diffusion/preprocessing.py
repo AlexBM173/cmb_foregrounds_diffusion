@@ -1,15 +1,14 @@
+import astropy.units as u
+import healpy as hp
 import numpy as np
 import torch
-import healpy as hp
-import astropy.units as u
-import os
 
-from foregrounds_diffusion.flatmaps import get_lxly, cl_to_cl2d
-
+from foregrounds_diffusion.flatmaps import cl_to_cl2d, get_lxly
 
 # ---------------------------------------------------------------------------
 # Normalisation utilities
 # ---------------------------------------------------------------------------
+
 
 def apply_maxmin_normalization(maps):
     min_val = np.nanmin(maps)
@@ -26,7 +25,7 @@ def apply_stdnorm(maps):
         channel = maps[..., c]
         std = np.std(channel)
         if std == 0:
-            maps[..., c] = 0.
+            maps[..., c] = 0.0
         else:
             maps[..., c] = (channel - np.mean(channel)) / std
     return maps
@@ -62,9 +61,7 @@ def renormalize_dm_maps(dm_maps, train_maps, variance_scaling=True):
             dm_std = np.std(dm_maps[:, :, :, i])
             tr_mean = np.mean(train_maps[:, :, :, i])
             tr_std = np.std(train_maps[:, :, :, i])
-            dm_maps[:, :, :, i] = (
-                (dm_maps[:, :, :, i] - dm_mean) * (tr_std / dm_std) + tr_mean
-            )
+            dm_maps[:, :, :, i] = (dm_maps[:, :, :, i] - dm_mean) * (tr_std / dm_std) + tr_mean
 
     return np.transpose(dm_maps, (0, 3, 1, 2))
 
@@ -96,6 +93,7 @@ def denormalize_dm_maps(dm_maps, cib_mean, cib_std, tsz_mean, tsz_std):
 # Moments loading
 # ---------------------------------------------------------------------------
 
+
 def load_all_moments(filename, bandpass_centers, max_lines=-1):
     """Load and normalise scattering moments from a .npy file.
 
@@ -116,18 +114,18 @@ def load_all_moments(filename, bandpass_centers, max_lines=-1):
     """
     moments_data = np.load(filename)[:max_lines]
     norms = [
-        bandpass_centers,       # S2aa
-        bandpass_centers,       # S2bb
-        bandpass_centers,       # S2ab
-        bandpass_centers,       # S3aaa
-        bandpass_centers,       # S3bbb
-        bandpass_centers,       # S3aab
-        bandpass_centers,       # S3abb
-        bandpass_centers ** 2,  # S4aaaa
-        bandpass_centers ** 2,  # S4bbbb
-        bandpass_centers ** 2,  # S4aaab
-        bandpass_centers ** 2,  # S4aabb
-        bandpass_centers ** 2,  # S4abbb
+        bandpass_centers,  # S2aa
+        bandpass_centers,  # S2bb
+        bandpass_centers,  # S2ab
+        bandpass_centers,  # S3aaa
+        bandpass_centers,  # S3bbb
+        bandpass_centers,  # S3aab
+        bandpass_centers,  # S3abb
+        bandpass_centers**2,  # S4aaaa
+        bandpass_centers**2,  # S4bbbb
+        bandpass_centers**2,  # S4aaab
+        bandpass_centers**2,  # S4aabb
+        bandpass_centers**2,  # S4abbb
     ]
     moments = {}
     for i in range(12):
@@ -139,6 +137,7 @@ def load_all_moments(filename, bandpass_centers, max_lines=-1):
 # ---------------------------------------------------------------------------
 # Patch-centre computation and HEALPix patch extraction
 # ---------------------------------------------------------------------------
+
 
 @u.quantity_input
 def get_patch_centers(gal_cut: u.deg, step_size: u.deg, pole_cut: u.deg):
@@ -159,8 +158,12 @@ def get_patch_centers(gal_cut: u.deg, step_size: u.deg, pole_cut: u.deg):
     gal_cut = gal_cut.to(u.deg)
     step_size = step_size.to(u.deg)
     pole_cut = pole_cut.to(u.deg)
-    southern = np.arange(-90 + pole_cut.value/2, (-gal_cut - step_size).value, step_size.value) * u.deg
-    northern = np.arange((gal_cut + step_size).value, 90 - pole_cut.value/2, step_size.value) * u.deg
+    southern = (
+        np.arange(-90 + pole_cut.value / 2, (-gal_cut - step_size).value, step_size.value) * u.deg
+    )
+    northern = (
+        np.arange((gal_cut + step_size).value, 90 - pole_cut.value / 2, step_size.value) * u.deg
+    )
     lat_range = np.concatenate((southern, northern))
 
     centers = []
@@ -189,10 +192,12 @@ class FlatCutter:
         self.ang_x = ang_x
         self.ang_y = ang_y
 
-        self.xarr = np.linspace(-self.ang_x.to(u.rad).value / 2.,
-                                 self.ang_x.to(u.rad).value / 2., xres)
-        self.yarr = np.linspace(-self.ang_y.to(u.rad).value / 2.,
-                                 self.ang_y.to(u.rad).value / 2., yres)
+        self.xarr = np.linspace(
+            -self.ang_x.to(u.rad).value / 2.0, self.ang_x.to(u.rad).value / 2.0, xres
+        )
+        self.yarr = np.linspace(
+            -self.ang_y.to(u.rad).value / 2.0, self.ang_y.to(u.rad).value / 2.0, yres
+        )
 
         xgrid, ygrid = np.meshgrid(self.xarr, self.yarr)
         xgrid = xgrid.ravel()[None, :]
@@ -222,28 +227,26 @@ class FlatCutter:
         """
         if hp.pixelfunc.maptype(ma) == 0:
             ma = [ma]
-        rotator = hp.Rotator(rot=[lon.to(u.deg).value,
-                                  lat.to(u.deg).value - 90.], deg=True)
+        rotator = hp.Rotator(rot=[lon.to(u.deg).value, lat.to(u.deg).value - 90.0], deg=True)
         self.inv_lon_grid, self.inv_lat_grid = rotator.I(
-            self.lons.to(u.deg).value,
-            self.lats.to(u.deg).value,
-            lonlat=True)
-        m_rot = [hp.get_interp_val(each, self.inv_lon_grid,
-                                   self.inv_lat_grid, lonlat=True)
-                 for each in ma]
+            self.lons.to(u.deg).value, self.lats.to(u.deg).value, lonlat=True
+        )
+        m_rot = [
+            hp.get_interp_val(each, self.inv_lon_grid, self.inv_lat_grid, lonlat=True)
+            for each in ma
+        ]
 
         if len(m_rot) > 1:
             m_rot[-2], m_rot[-1] = _spin2rot(
-                m_rot[-2], m_rot[-1],
-                rotator.angle_ref(self.inv_lon_grid, self.inv_lat_grid,
-                                  lonlat=True))
-            m_rot[-2], m_rot[-1] = _spin2rot(
-                m_rot[-2], m_rot[-1], self.lons.to(u.rad).value)
+                m_rot[-2],
+                m_rot[-1],
+                rotator.angle_ref(self.inv_lon_grid, self.inv_lat_grid, lonlat=True),
+            )
+            m_rot[-2], m_rot[-1] = _spin2rot(m_rot[-2], m_rot[-1], self.lons.to(u.rad).value)
         else:
             m_rot = m_rot[0]
 
-        return np.moveaxis(
-            np.array(m_rot).reshape(-1, self.xres, self.yres), 0, -1)
+        return np.moveaxis(np.array(m_rot).reshape(-1, self.xres, self.yres), 0, -1)
 
 
 def _spin2rot(q, u, angle):
@@ -255,6 +258,7 @@ def _spin2rot(q, u, angle):
 # ---------------------------------------------------------------------------
 # HEALPix map utilities
 # ---------------------------------------------------------------------------
+
 
 def replace_zeros_with_neighbor_avg(hp_map):
     """Replace zero pixels in a HEALPix map with the average of non-zero neighbours.
@@ -282,6 +286,7 @@ def replace_zeros_with_neighbor_avg(hp_map):
 # Fourier-space filtering
 # ---------------------------------------------------------------------------
 
+
 def get_lpf_hpf(flatskymapparams, lmin_lmax, filter_type=0):
     """Build a 2D Fourier filter (low-pass, high-pass, or band-pass).
 
@@ -300,16 +305,16 @@ def get_lpf_hpf(flatskymapparams, lmin_lmax, filter_type=0):
         2D binary filter array.
     """
     lx, ly = get_lxly(flatskymapparams)
-    ell = np.sqrt(lx ** 2. + ly ** 2.)
+    ell = np.sqrt(lx**2.0 + ly**2.0)
     fft_filter = np.ones(ell.shape)
     if filter_type == 0:
-        fft_filter[ell > lmin_lmax] = 0.
+        fft_filter[ell > lmin_lmax] = 0.0
     elif filter_type == 1:
-        fft_filter[ell < lmin_lmax] = 0.
+        fft_filter[ell < lmin_lmax] = 0.0
     elif filter_type == 2:
         lmin, lmax = lmin_lmax
-        fft_filter[ell < lmin] = 0.
-        fft_filter[ell > lmax] = 0.
+        fft_filter[ell < lmin] = 0.0
+        fft_filter[ell > lmax] = 0.0
     return fft_filter
 
 
@@ -341,8 +346,8 @@ def wiener_filter(mapparams, cl_signal, cl_noise, el=None):
 # Dataset splitting
 # ---------------------------------------------------------------------------
 
-def split_data_to_tensors(data, train_size=0.7, val_size=0.15,
-                          test_size=0.15, seed=42):
+
+def split_data_to_tensors(data, train_size=0.7, val_size=0.15, test_size=0.15, seed=42):
     """Split a numpy array into train/val/test PyTorch tensors.
 
     Parameters
@@ -369,12 +374,11 @@ def split_data_to_tensors(data, train_size=0.7, val_size=0.15,
     train_end = int(train_size * len(indices))
     val_end = train_end + int(val_size * len(indices))
 
-    train_set = torch.tensor(
-        data[indices[:train_end]].transpose(0, 3, 1, 2), dtype=torch.float32)
+    train_set = torch.tensor(data[indices[:train_end]].transpose(0, 3, 1, 2), dtype=torch.float32)
     val_set = torch.tensor(
-        data[indices[train_end:val_end]].transpose(0, 3, 1, 2), dtype=torch.float32)
-    test_set = torch.tensor(
-        data[indices[val_end:]].transpose(0, 3, 1, 2), dtype=torch.float32)
+        data[indices[train_end:val_end]].transpose(0, 3, 1, 2), dtype=torch.float32
+    )
+    test_set = torch.tensor(data[indices[val_end:]].transpose(0, 3, 1, 2), dtype=torch.float32)
 
     return train_set, val_set, test_set
 
@@ -382,6 +386,7 @@ def split_data_to_tensors(data, train_size=0.7, val_size=0.15,
 # ---------------------------------------------------------------------------
 # Data augmentation
 # ---------------------------------------------------------------------------
+
 
 def augment_images_unique(images):
     """Apply 8× augmentation: 4 rotations × horizontal flip.

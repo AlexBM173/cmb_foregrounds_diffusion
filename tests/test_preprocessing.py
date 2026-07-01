@@ -10,10 +10,10 @@ from foregrounds_diffusion.preprocessing import (
     split_data_to_tensors,
 )
 
-
 # ---------------------------------------------------------------------------
 # apply_maxmin_normalization
 # ---------------------------------------------------------------------------
+
 
 def test_maxmin_range():
     rng = np.random.default_rng(0)
@@ -44,6 +44,7 @@ def test_maxmin_preserves_shape():
 # ---------------------------------------------------------------------------
 # apply_stdnorm
 # ---------------------------------------------------------------------------
+
 
 def test_stdnorm_zero_mean_unit_std():
     rng = np.random.default_rng(1)
@@ -78,6 +79,7 @@ def test_stdnorm_does_not_mutate_input():
 # augment_images_unique
 # ---------------------------------------------------------------------------
 
+
 def test_augment_output_shape():
     N, C, H, W = 3, 2, 16, 16
     images = torch.randn(N, C, H, W)
@@ -107,6 +109,7 @@ def test_augment_preserves_pixel_statistics():
 # ---------------------------------------------------------------------------
 # get_lpf_hpf
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def params():
@@ -146,6 +149,7 @@ def test_lpf_binary_values(params):
 # ---------------------------------------------------------------------------
 # split_data_to_tensors
 # ---------------------------------------------------------------------------
+
 
 def test_split_sizes_sum_to_n():
     data = np.random.randn(100, 16, 16, 2).astype(np.float32)

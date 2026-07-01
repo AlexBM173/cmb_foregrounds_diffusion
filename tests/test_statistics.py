@@ -32,7 +32,7 @@ def test_moments_centre_estimate():
     x = np.arange(32)
     y = np.arange(32)
     xx, yy = np.meshgrid(x, y)
-    data = np.exp(-((xx - 16) ** 2 + (yy - 16) ** 2) / (2 * 3 ** 2))
+    data = np.exp(-((xx - 16) ** 2 + (yy - 16) ** 2) / (2 * 3**2))
     _, cx, cy, _, _ = moments(data)
     assert abs(cx - 16) < 1.0
     assert abs(cy - 16) < 1.0
@@ -46,7 +46,7 @@ def test_fitgaussian_centre_within_one_pixel():
     y = np.arange(32)
     xx, yy = np.meshgrid(x, y)
     row_true, col_true = 17, 14
-    data = np.exp(-((xx - col_true) ** 2 + (yy - row_true) ** 2) / (2 * 3 ** 2))
+    data = np.exp(-((xx - col_true) ** 2 + (yy - row_true) ** 2) / (2 * 3**2))
     _, row_fit, col_fit, _, _ = fitgaussian(data)
     assert abs(row_fit - row_true) < 1.0
     assert abs(col_fit - col_true) < 1.0

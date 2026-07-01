@@ -1,10 +1,10 @@
 import numpy as np
-from scipy.ndimage import sobel, binary_erosion
-
+from scipy.ndimage import binary_erosion, sobel
 
 # ---------------------------------------------------------------------------
 # Minkowski functionals
 # ---------------------------------------------------------------------------
+
 
 def compute_mfs(maps_nhw, norm_fn, thresholds):
     """Compute Minkowski functionals M0, M1, M2 across a stack of maps.
@@ -26,6 +26,7 @@ def compute_mfs(maps_nhw, norm_fn, thresholds):
         M0 = area fraction, M1 = perimeter, M2 = Euler characteristic.
     """
     from quantimpy import minkowski as mk
+
     M0 = np.zeros((len(maps_nhw), len(thresholds)))
     M1 = np.zeros_like(M0)
     M2 = np.zeros_like(M0)
@@ -44,6 +45,7 @@ def compute_mfs(maps_nhw, norm_fn, thresholds):
 # Minkowski tensors
 # ---------------------------------------------------------------------------
 
+
 def _tensor_W012(binary_map):
     """W^{0,2}_1 — interface normal tensor.
 
@@ -59,13 +61,12 @@ def _tensor_W012(binary_map):
     gx = sobel(binary_map.astype(np.float64), axis=1)
     gy = sobel(binary_map.astype(np.float64), axis=0)
     bx, by = gx[boundary], gy[boundary]
-    norm = np.sqrt(bx ** 2 + by ** 2)
+    norm = np.sqrt(bx**2 + by**2)
     valid = norm > 0
     if not valid.any():
         return np.eye(2) * 0.5
     nx, ny = bx[valid] / norm[valid], by[valid] / norm[valid]
-    return np.array([[np.sum(nx * nx), np.sum(nx * ny)],
-                     [np.sum(nx * ny), np.sum(ny * ny)]])
+    return np.array([[np.sum(nx * nx), np.sum(nx * ny)], [np.sum(nx * ny), np.sum(ny * ny)]])
 
 
 def _tensor_W200(binary_map, centred=True):
@@ -101,22 +102,22 @@ def _tensor_W201(binary_map, centred=True):
 
 
 _TENSOR_FUNCTIONS = {
-    'W012': _tensor_W012,
-    'W200': _tensor_W200,
-    'W201': _tensor_W201,
+    "W012": _tensor_W012,
+    "W200": _tensor_W200,
+    "W201": _tensor_W201,
 }
 
 MINKOWSKI_TENSOR_DESCRIPTIONS = {
-    'W012': (
+    "W012": (
         "W^{0,2}_1 — interface normal tensor: sums n⊗n over boundary pixels "
         "(Sobel-estimated outward normals). Probes isotropy of cluster boundary "
         "shapes; recommended default."
     ),
-    'W200': (
+    "W200": (
         "W^{2,0}_0 — area inertia tensor: sums r⊗r over interior pixels. "
         "Measures elongation of the filled excursion region."
     ),
-    'W201': (
+    "W201": (
         "W^{2,0}_1 — boundary position tensor: sums r⊗r over boundary pixels. "
         "Hybrid: position-weighted boundary measure, intermediate sensitivity "
         "between W012 and W200."
@@ -139,12 +140,12 @@ def _eigendecompose_2x2(W):
     theta : float
         Angle of the major eigenvector in radians, wrapped to (-π/2, π/2].
     """
-    eigenvalues, eigenvectors = np.linalg.eigh(W)   # ascending order
+    eigenvalues, eigenvectors = np.linalg.eigh(W)  # ascending order
     lam_min, lam_max = eigenvalues[0], eigenvalues[1]
     if lam_max <= 0:
         return 1.0, 0.0
     beta = float(lam_min / lam_max)
-    vx, vy = eigenvectors[:, 1]                     # major eigenvector
+    vx, vy = eigenvectors[:, 1]  # major eigenvector
     theta = float(np.arctan2(vy, vx))
     if theta > np.pi / 2:
         theta -= np.pi
@@ -153,8 +154,9 @@ def _eigendecompose_2x2(W):
     return beta, theta
 
 
-def compute_minkowski_tensors(maps_nhw, norm_fn, thresholds,
-                               tensor_types=('W012',), centred=True, n_jobs=1):
+def compute_minkowski_tensors(
+    maps_nhw, norm_fn, thresholds, tensor_types=("W012",), centred=True, n_jobs=1
+):
     """Compute Minkowski tensor anisotropy indices across intensity thresholds.
 
     For each map and threshold ν, the map is binarised to the excursion set
@@ -221,21 +223,24 @@ def compute_minkowski_tensors(maps_nhw, norm_fn, thresholds,
 
     if n_jobs != 1:
         from joblib import Parallel, delayed
+
         chunks = np.array_split(np.arange(N), abs(n_jobs) if n_jobs != -1 else N)
         parts = Parallel(n_jobs=n_jobs)(
             delayed(compute_minkowski_tensors)(
                 maps_nhw[idx], norm_fn, thresholds, tensor_types, centred, 1
             )
-            for idx in chunks if len(idx) > 0
+            for idx in chunks
+            if len(idx) > 0
         )
-        return {tt: {stat: np.concatenate([p[tt][stat] for p in parts], axis=0)
-                     for stat in ('beta', 'theta')}
-                for tt in tensor_types}
+        return {
+            tt: {
+                stat: np.concatenate([p[tt][stat] for p in parts], axis=0)
+                for stat in ("beta", "theta")
+            }
+            for tt in tensor_types
+        }
 
-    results = {
-        tt: {'beta': np.ones((N, T)), 'theta': np.zeros((N, T))}
-        for tt in tensor_types
-    }
+    results = {tt: {"beta": np.ones((N, T)), "theta": np.zeros((N, T))} for tt in tensor_types}
 
     for i, m in enumerate(maps_nhw):
         m_norm = np.ascontiguousarray(norm_fn(m), dtype=np.float64)
@@ -245,13 +250,13 @@ def compute_minkowski_tensors(maps_nhw, norm_fn, thresholds,
         for t, binary in enumerate(all_binary):
             n_interior = int(binary.sum())
             if n_interior < 2 or n_interior > binary.size - 2:
-                continue                              # trivially isotropic
+                continue  # trivially isotropic
             for tt in tensor_types:
                 fn = _TENSOR_FUNCTIONS[tt]
-                kwargs = {'centred': centred} if tt in ('W200', 'W201') else {}
+                kwargs = {"centred": centred} if tt in ("W200", "W201") else {}
                 W = fn(binary, **kwargs)
                 beta, theta = _eigendecompose_2x2(W)
-                results[tt]['beta'][i, t] = beta
-                results[tt]['theta'][i, t] = theta
+                results[tt]["beta"][i, t] = beta
+                results[tt]["theta"][i, t] = theta
 
     return results

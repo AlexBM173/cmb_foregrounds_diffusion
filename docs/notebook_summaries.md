@@ -230,6 +230,26 @@ Plots: (1) β(ν) 2×3 grid (rows = CIB/tSZ, cols = tensor type) with mean ± st
 
 ---
 
+## `docs/tutorials/13_benchmarks.ipynb`
+
+Profiling and benchmarking of the evaluation-statistics functions. Builds synthetic Gaussian fixtures at a range of sizes and sweeps input dimensions (N maps, map side length, thresholds, ℓ-bands) to measure wall-clock time and recover empirical scaling exponents. Section 2 profiles the four hottest functions (`compute_minkowski_tensors`, `compute_cross_moments`, `map2cl`, `compute_peak_minima_counts`); sections 4–6 record the applied optimisations and before/after comparisons; section 7 is the scaling-law summary table; section 8 covers `joblib` strong-scaling (Figure 11) using the `n_jobs` parameter now on the public functions.
+
+**Paper relation:** No paper section — engineering/reproducibility appendix.
+
+**Module relation:** Exercises the `n_jobs` paths in `moments.py`, `morphology.py`, `peak_counts.py`, and the `map2cl_torch` GPU port in `flatmaps.py`. Correctness of the optimised paths is guarded by `tests/benchmarks/test_equivalence.py`.
+
+---
+
+## `docs/tutorials/14_paper_figures.ipynb`
+
+Generates the publication figures from the trained checkpoint and AGORA maps: multifrequency and CIB–tSZ map panels, power-spectrum comparisons, higher-order moments, and Minkowski functionals. Applies the `plot_style.apply()` Wong-palette style and saves each figure as PDF (LaTeX) + PNG (300 dpi). Depends on the outputs of notebooks 06–09 and requires the FITS data / checkpoint, so it is not executed on ReadTheDocs.
+
+**Paper relation:** Reproduces the figures of Prabhu et al. (§4).
+
+**Module relation:** Uses `plot_style.py` plus the statistics modules (`moments.py`, `morphology.py`, `flatmaps.py`) and `preprocessing.denormalize_dm_maps` for physical-unit conversion.
+
+---
+
 ## Package module structure (post-refactor)
 
 `statistics.py` was split into focused modules. The table below shows where each function now lives.

@@ -1,0 +1,203 @@
+# =============================================================================
+# foregrounds_diffusion — master pipeline configuration
+# =============================================================================
+# One YAML drives the full pipeline:
+#
+#     python run.py train    --config config/default.yaml
+#     python run.py sample   --config config/default.yaml
+#     python run.py evaluate --config config/default.yaml
+#     python run.py all      --config config/default.yaml
+#
+# Validate without running anything:
+#
+#     python config/validate.py config/default.yaml
+#
+# Every run creates runs/<run_name>/ containing a copy of this config, its
+# SHA256 hash, and the git commit — so every artefact traces back to an exact
+# configuration and code state.
+#
+# All default values below reproduce the tutorial-notebook pipeline
+# (docs/tutorials/01–09) exactly; the source notebook is noted per section.
+# =============================================================================
+
+run_name: example_run
+
+output:
+  # All run artefacts land in <base_dir>/<run_name>/ (see pipeline/rundir.py).
+  base_dir: runs
+
+# -----------------------------------------------------------------------------
+# Raw data and patch geometry (notebooks 01–03)
+# -----------------------------------------------------------------------------
+data:
+  # Full-sky HEALPix maps from the AGORA simulation (Globus paths in README §Data).
+  cib_map: data/agora_len_mag_cibmap_act_150ghz.fits            # Jy/sr
+  tsz_map: data/agora_ltszNG_bahamas80_bnd_unb_1.0e+12_1.0e+18_lensed.fits  # Compton-y
+  halo_catalogue: data/halo_catalogue/halo_catalogue_m500gt3e14.npz
+  frequency_ghz: 150
+  nside_in: 8192        # resolution of the raw maps (point-source masking runs here)
+  nside_out: 2048       # downgraded resolution used for patch extraction
+  patch_deg: 6.0        # patch side length in degrees
+  step_deg: 6.0         # patch centre spacing in degrees (< patch_deg ⇒ overlap)
+  res: 256              # pixels per patch side (6° / 256 px = 1.40625′/px)
+  gal_cut_deg: 20.0     # exclude patch centres within this of the Galactic plane
+  pole_cut_deg: 6.0     # exclude patch centres within this of the poles
+  train_size: 0.8       # train/val/test must sum to 1
+  val_size: 0.1
+  test_size: 0.1
+  seed: 42              # np.random.default_rng seed for the split
+  # Where the training-ready .npy patch files live. null ⇒ <run_dir>/data/patches.
+  # For runs on patches produced by notebook 03, point this at that directory,
+  # e.g. docs/tutorials/data/low_pass/2mJy
+  patches_dir: null
+
+# -----------------------------------------------------------------------------
+# Preprocessing (notebooks 02–03)
+# -----------------------------------------------------------------------------
+preprocessing:
+  lowpass:
+    type: sharp         # sharp | cosine | wiener — filter profile at ell_max
+    ell_max: 7000       # low-pass cut-off multipole
+  normalisation: zscore # zscore | minmax — zscore (both channels) is canonical;
+                        # see docs/paper_code_inconsistencies.md #7
+  point_source_mjy: 2   # flux-density masking threshold at nside_in
+  cluster_mask:
+    enabled: true
+    m500c_min: 3.0e+14        # M_sun — mask halos above this mass (keep the
+                              # explicit +: YAML parses 3.0e14 as a string)
+    theta500_multiplier: 3.0  # apodised mask radius = multiplier × θ500c
+  inpainting: gaussian_noise  # fill for masked pixels before filtering
+  augmentation: true          # 8× (4 rotations × mirror) at training time
+
+# -----------------------------------------------------------------------------
+# Model architecture (train.py / sample.py — must match a checkpoint to load it)
+# -----------------------------------------------------------------------------
+model:
+  dim: 64
+  dim_mults: [1, 2, 4, 8]
+  channels: 2           # CIB + tSZ
+  flash_attn: true
+  timesteps: 1000       # forward-process length
+  noise_schedule: sigmoid   # linear | cosine | sigmoid (sigmoid = package default)
+  objective: pred_v         # pred_v | pred_noise | pred_x0 (pred_v = package default)
+  auto_normalize: false     # MUST be false for z-score data: true rescales samples
+                            # [-1,1]→[0,1] on output, corrupting amplitudes
+
+# -----------------------------------------------------------------------------
+# Training (train.py)
+# -----------------------------------------------------------------------------
+training:
+  batch_size: 16            # per GPU
+  lr: 1.0e-4
+  lr_scheduler: none        # none | cosine (none = current pipeline behaviour)
+  warmup_steps: 0
+  train_num_steps: 100000
+  gradient_accumulate_every: 2
+  ema_decay: 0.995
+  mixed_precision: bf16     # no | fp16 | bf16
+  save_and_sample_every: 5000
+  milestone_num_samples: 25 # sampled at each checkpoint; needs integer sqrt; 0 = skip
+  resume_from_checkpoint: false  # continue from latest model-*.pt in checkpoints/
+  num_gpus: 1               # informational; accelerate handles device placement
+
+# -----------------------------------------------------------------------------
+# Sampling (sample.py)
+# -----------------------------------------------------------------------------
+sampling:
+  num_samples: 640
+  batch_size: 16
+  ddim_steps: 250       # null = full DDPM (model.timesteps); ~4× faster at 250
+  output_format: npy    # npy only for now (fits/h5 planned for v0.2)
+  compile: false        # torch.compile the U-Net (one-off warm-up cost)
+  rescale_cib: null     # opt-in post-sampling scalar rescale (paper §3.2)
+  rescale_tsz: null
+
+# -----------------------------------------------------------------------------
+# Evaluation statistics (notebooks 06–12); each entry mirrors its notebook's
+# configuration cell. Remove a name from `statistics` to skip it.
+# -----------------------------------------------------------------------------
+evaluation:
+  n_jobs: 8             # CPU workers for parallelised statistics
+  statistics:
+    - power_spectrum
+    - cross_spectrum
+    - moments
+    - cross_moments
+    - minkowski_functionals
+    - pixel_histograms
+    - tsz_stacking
+    # extensions (Gate D): peak_counts, minima_counts, scattering_transforms
+
+  power_spectrum:        # notebook 06
+    lmin: 300
+    lmax: 4000
+    binsize: 60
+    n_maps: 500
+  cross_spectrum:        # notebook 06
+    lmin: 300
+    lmax: 4000
+    binsize: 60
+    n_maps: 500
+  moments:               # notebook 07 — S2/S3/S4 of the summed channel
+    n_bands: 8
+    lmin: 300
+    lmax: 6060           # 8 uniform bands of width Δℓ = 720
+    n_maps: 200
+  cross_moments:         # notebook 07 appendix — 12 CIB×tSZ combinations
+    n_bands: 8
+    lmin: 300
+    lmax: 6060
+    n_maps: 200
+  minkowski_functionals: # notebook 08
+    n_thresholds: 50
+    threshold_min: 0.0   # thresholds span the min-max normalised map range
+    threshold_max: 1.0
+    n_maps: 200
+  pixel_histograms:      # notebook 08
+    n_bins: 1000
+    cib_range: [0.0, 1.0]
+    tsz_range: [-5.0, 5.0]
+    smooth_sigma: 1.0    # Gaussian smoothing of the histogram (bins)
+    n_maps: 200
+  peak_counts:           # notebook 10 (extension)
+    smoothing_fwhm_arcmin: [1.0, 2.5, 5.0]
+    threshold_min: -1.0
+    threshold_max: 5.0
+    n_thresholds: 30
+    n_maps: 120
+  minima_counts:         # notebook 10 (extension)
+    smoothing_fwhm_arcmin: [1.0, 2.5, 5.0]
+    threshold_min: -5.0
+    threshold_max: 1.0
+    n_thresholds: 30
+    n_maps: 120
+  scattering_transforms: # notebook 11 (extension)
+    J: 5                 # number of dyadic scales
+    L: 4                 # number of orientations
+    n_maps: 100
+  tsz_stacking:          # notebook 09
+    snr_bins: [[5, 10], [10, 20], [20, null]]   # null = no upper bound
+    cutout_pix: 40       # 40 px ≈ 56′ at 1.40625′/px
+    n_maps: 200
+
+# -----------------------------------------------------------------------------
+# Weights & Biases (optional — the pipeline runs without wandb installed)
+# -----------------------------------------------------------------------------
+wandb:
+  enabled: false
+  project: cmb_foregrounds_diffusion
+  entity: null
+  tags: []
+
+# -----------------------------------------------------------------------------
+# SLURM (v0.2 — cluster job-script generation is deferred; fields are kept so
+# configs written for cluster environments validate cleanly)
+# -----------------------------------------------------------------------------
+slurm:
+  partition: ampere
+  qos: null
+  account: null
+  num_gpus: 1
+  mem: 64G
+  time: "12:00:00"
+  mail_user: null

@@ -35,6 +35,7 @@ dependencies = [
     "ema-pytorch>=0.7",
     "pillow>=12.0",
     "pytorch-fid>=0.3",
+    "pyyaml>=6.0",
     "tqdm>=4.67",
 ]
 

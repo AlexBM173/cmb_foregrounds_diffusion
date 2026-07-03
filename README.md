@@ -76,6 +76,27 @@ cd cmb_foregrounds_diffusion
 pip install -e ".[dev]"
 ```
 
+## Quickstart — config-driven pipeline
+
+One YAML file drives every stage; `config/default.yaml` is the fully
+documented template reproducing the paper pipeline. Each run writes all of
+its artefacts to `runs/<run_name>/` alongside a copy of the config, its
+SHA256 hash, and the git commit, so every result traces back to an exact
+configuration and code state.
+
+```bash
+cp config/default.yaml config/my_run.yaml   # edit run_name, paths, settings
+python config/validate.py config/my_run.yaml
+
+python run.py train    --config config/my_run.yaml   # or: accelerate launch run.py train ...
+python run.py sample   --config config/my_run.yaml
+python run.py evaluate --config config/my_run.yaml
+```
+
+Add `--dry-run` to any stage to print what would run without executing it.
+The original flag-based entry points (`accelerate launch train.py ...`,
+`fd-sample`) remain available and unchanged.
+
 ## Data
 
 ### Globus Collections

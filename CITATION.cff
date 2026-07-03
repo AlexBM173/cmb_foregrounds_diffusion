@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "foregrounds_diffusion: DDPM pipeline for correlated CIB and tSZ CMB foregrounds"
+authors:
+  - family-names: "Blake Martín"
+    given-names: "Alex"
+    email: alexbm173@gmail.com
+version: 0.1.1
+license: MIT
+repository-code: "https://github.com/AlexBM173/cmb_foregrounds_diffusion"
+url: "https://cmb-foregrounds-diffusion.readthedocs.io"
+keywords:
+  - cosmology
+  - CMB
+  - diffusion models
+  - deep learning

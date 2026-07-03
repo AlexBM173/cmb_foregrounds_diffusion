@@ -27,7 +27,11 @@ DEFAULT_BATCHES = 5
 DEFAULT_BATCH_SIZE = 16
 
 
-def build_model(channels: int = 2, sampling_timesteps: int | None = None) -> GaussianDiffusion:
+def build_model(
+    channels: int = 2,
+    sampling_timesteps: int | None = None,
+    auto_normalize: bool = False,
+) -> GaussianDiffusion:
     """Instantiate the U-Net and wrap it in a GaussianDiffusion object.
 
     Parameters
@@ -38,6 +42,11 @@ def build_model(channels: int = 2, sampling_timesteps: int | None = None) -> Gau
         Number of DDIM reverse steps. ``None`` (default) uses full DDPM
         sampling (1000 steps). Any value < 1000 enables DDIM acceleration;
         50–250 gives a good quality/speed trade-off.
+    auto_normalize : bool
+        Must match the value used at training time (``train.py`` uses
+        ``False``). When ``True`` the library rescales samples from
+        ``[-1, 1]`` to ``[0, 1]`` on the way out — a transform z-score
+        trained models never saw, which silently corrupts sample amplitudes.
 
     Returns
     -------
@@ -50,7 +59,7 @@ def build_model(channels: int = 2, sampling_timesteps: int | None = None) -> Gau
         channels=channels,
         flash_attn=True,
     )
-    kwargs = {"image_size": 256, "timesteps": 1000}
+    kwargs = {"image_size": 256, "timesteps": 1000, "auto_normalize": auto_normalize}
     if sampling_timesteps is not None:
         kwargs["sampling_timesteps"] = sampling_timesteps
     return GaussianDiffusion(unet, **kwargs)
@@ -116,7 +125,16 @@ def sample(
     return np.concatenate(sampled_batches, axis=0)
 
 
-def main():
+def main(argv: list[str] | None = None):
+    """Run the sampling CLI.
+
+    Parameters
+    ----------
+    argv : list of str or None
+        Command-line arguments. ``None`` (default) reads ``sys.argv``,
+        preserving the original CLI behaviour; passing a list allows the
+        pipeline runner (``run.py``) to call this entry point directly.
+    """
     parser = argparse.ArgumentParser(description="Sample from a trained DDPM foreground model.")
     parser.add_argument(
         "--checkpoint", default=DEFAULT_CHECKPOINT, help="Path to model checkpoint (.pt)"
@@ -177,7 +195,7 @@ def main():
         default=False,
         help="Enable Weights & Biases logging (also set via WANDB=1 env var)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     import os
 

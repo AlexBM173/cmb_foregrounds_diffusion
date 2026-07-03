@@ -19,6 +19,9 @@ accelerate launch train.py --run-name my_run_v1
 # Train with Weights & Biases logging
 accelerate launch train.py --run-name my_run_v1 --wandb
 
+# Resume an interrupted run from its latest checkpoint in results/my_run_v1/
+accelerate launch train.py --run-name my_run_v1 --resume
+
 # Sample from a trained checkpoint
 accelerate launch foregrounds_diffusion/sample.py \
   --checkpoint results/my_run_v1/model-20.pt \
@@ -91,7 +94,7 @@ The pipeline is:
 | `masking.py` | Flat-sky peak masks (`get_peak_masks`, `inpaint_masked_regions`, `boundary_apod_mask`, `get_mask_using_gaussian_fitting`) and AGORA MDPL2 cluster/point-source masks (`get_point_source_mask_in_healpix`, `get_apodised_mdpl2_cluster_mask`, etc.) |
 | `peak_counts.py` | Peak and minima counting statistics (Sabyr et al. 2024): `smooth_map`, `find_peaks`, `find_minima`, `count_peaks_binned`, `count_minima_binned`, `compute_peak_minima_counts`. numpy/scipy only. |
 | `scattering_stats.py` | Scattering transform statistics: `compute_scattering_coefficients` (S1, S2), `compute_scattering_covariance` (C11, Cheng et al. backend only), `scattering_summary`. Requires Cheng et al. repo or `kymatio`. |
-| `train.py` | Training entry point (not a library module — run via `accelerate launch`). CLI: `--run-name`, `--steps`, `--batch-size`, `--lr`, `--wandb` |
+| `train.py` | Training entry point (not a library module — run via `accelerate launch`). CLI: `--run-name`, `--steps`, `--batch-size`, `--lr`, `--save-every`, `--num-samples` (0 skips milestone sampling), `--resume` (continue from latest `model-*.pt`), `--wandb` |
 | `sample.py` | Sampling entry point. CLI: `--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`, `--sampling-timesteps` (DDIM), `--rescale-cib`/`--rescale-tsz` (opt-in post-sampling scalar rescaling, paper §3.2), `--compile` (torch.compile the U-Net), `--wandb` |
 | `redundant/` | Old scripts kept for reference; not part of the active codebase |
 

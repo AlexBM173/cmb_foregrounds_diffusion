@@ -64,20 +64,24 @@ class WandbTrainer1D(Trainer1D):
                     self.ema.update()
 
                     if self.step != 0 and self.step % self.save_and_sample_every == 0:
-                        self.ema.ema_model.eval()
                         milestone = self.step // self.save_and_sample_every
 
-                        with torch.no_grad():
-                            batches = num_to_groups(self.num_samples, self.batch_size)
-                            all_samples = torch.cat(
-                                [self.ema.ema_model.sample(batch_size=n) for n in batches], dim=0
-                            )
+                        if self.num_samples > 0:
+                            self.ema.ema_model.eval()
 
-                        sample_path = self.results_folder / f"sample-{milestone}.pt"
-                        torch.save(all_samples, str(sample_path))
+                            with torch.no_grad():
+                                batches = num_to_groups(self.num_samples, self.batch_size)
+                                all_samples = torch.cat(
+                                    [self.ema.ema_model.sample(batch_size=n) for n in batches],
+                                    dim=0,
+                                )
+
+                            sample_path = self.results_folder / f"sample-{milestone}.pt"
+                            torch.save(all_samples, str(sample_path))
+
                         self.save(milestone)
 
-                        if log:
+                        if log and self.num_samples > 0:
                             import wandb
 
                             samples_np = all_samples.cpu().numpy()
@@ -120,6 +124,27 @@ parser.add_argument("--steps", type=int, default=100000, help="Training steps (d
 parser.add_argument("--batch-size", type=int, default=16, help="Batch size per GPU (default: 16)")
 parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate (default: 1e-4)")
 parser.add_argument(
+    "--save-every",
+    type=int,
+    default=5000,
+    metavar="N",
+    help="Save a checkpoint (and sample) every N steps (default: 5000)",
+)
+parser.add_argument(
+    "--num-samples",
+    type=int,
+    default=25,
+    metavar="M",
+    help="Samples to generate at each checkpoint milestone; must have an integer "
+    "square root; 0 disables milestone sampling (default: 25)",
+)
+parser.add_argument(
+    "--resume",
+    action="store_true",
+    default=False,
+    help="Resume from the latest model-*.pt in results/<run-name>/ (also set via RESUME=1 env var)",
+)
+parser.add_argument(
     "--wandb",
     action="store_true",
     default=False,
@@ -137,6 +162,7 @@ if not run_name:
     )
 
 use_wandb = args.wandb or os.environ.get("WANDB", "").strip() in ("1", "true", "yes")
+resume = args.resume or os.environ.get("RESUME", "").strip() in ("1", "true", "yes")
 
 RES = args.res
 PTSRC = args.ptsrc
@@ -186,7 +212,8 @@ trainer = WandbTrainer1D(
     train_batch_size=args.batch_size,
     train_lr=args.lr,
     train_num_steps=args.steps,
-    save_and_sample_every=5000,
+    save_and_sample_every=args.save_every,
+    num_samples=args.num_samples,
     gradient_accumulate_every=2,
     ema_decay=0.995,
     mixed_precision_type="bf16",
@@ -208,6 +235,23 @@ trainer.dl = cycle(
 )
 
 # ---------------------------------------------------------------------------
+# Resume
+# ---------------------------------------------------------------------------
+
+resume_step = 0
+if resume:
+    checkpoints = sorted(RESULTS_DIR.glob("model-*.pt"), key=lambda p: int(p.stem.split("-")[-1]))
+    if not checkpoints:
+        raise SystemExit(
+            f"--resume: no model-*.pt checkpoints found in {RESULTS_DIR}/. "
+            "Restore them first, or drop --resume to start from scratch."
+        )
+    milestone = int(checkpoints[-1].stem.split("-")[-1])
+    trainer.load(milestone)
+    resume_step = trainer.step
+    trainer.accelerator.print(f"Resumed from {checkpoints[-1]} (step {trainer.step})")
+
+# ---------------------------------------------------------------------------
 # Log run config
 # ---------------------------------------------------------------------------
 
@@ -224,6 +268,9 @@ run_config = {
     "train_steps": args.steps,
     "batch_size": args.batch_size,
     "lr": args.lr,
+    "save_every": args.save_every,
+    "num_samples": args.num_samples,
+    "resumed_from_step": resume_step,
     "wandb": use_wandb,
 }
 with open(RESULTS_DIR / "run_config.json", "w") as f:
@@ -243,6 +290,8 @@ if use_wandb and trainer.accelerator.is_main_process:
     wandb.init(
         project="cmb_foregrounds_diffusion",
         name=run_name,
+        id=run_name,
+        resume="allow",
         config=run_config,
     )
 

@@ -11,14 +11,37 @@ with the following ordering constraints:
 
 ## Scope
 
-**Thesis deadline: 2026-07-08.**
-All phases are pre-submission. Phase 0 (model extensions requiring HPC) is excluded
-because the cluster is down. Phases 1–6 are all in scope.
+**Deadline: 23:59 BST, 2026-07-12 (report + executive summary submission).**
 
-**Top open risk:** the normalisation scheme is contested between notebooks 03 and 06
-(inconsistency #7 in `docs/paper_code_inconsistencies.md`) and must be resolved on the
-cluster before any statistic's absolute amplitude is trusted — see the ⚠ BLOCKER in the
-Cluster action plan below.
+**Infrastructure change (2026-07-03):** the HPC cluster is permanently unreachable —
+files and compute cannot be recovered in any relevant timeframe. The project has
+migrated to a new GCP project (VM for storage/CPU preprocessing, billing reimbursed)
+plus **Google Colab Pro Plus** for GPU training/sampling. This is a harder reset than
+the old "cluster is down temporarily" framing: **no trained checkpoint and no
+preprocessed `.npy` patch arrays survive** — only the raw Agora FITS maps and halo
+lightcone slices. The critical path now runs the *entire* pipeline from raw data:
+preprocessing (01–03) → training from scratch → sampling → statistics (06–09) →
+paper figures (14) → writeup, in 9 days on a single GPU with no SLURM/multi-node
+tooling. See the **GCP / Colab action plan** below — it supersedes the old cluster
+action plan.
+
+Phases 1–6 (tests, profiling, parallelisation, docs, PyPI, CI/CD) were completed
+locally before the HPC loss and are unaffected by the migration — that work stands.
+Everything in §3.4–3.7 (multi-GPU, MPI, SLURM arrays) assumed CSD3-style multi-node
+access and is now **out of scope**: Colab Pro Plus is single-GPU. Those sections are
+kept below as reference documentation only, not as remaining work.
+
+**Top open risk:** training a DDPM from scratch (default 100k steps) on a single
+Colab GPU within the time budget. Disconnects are survivable (checkpoint +
+`--resume`); a genuine divergence has exactly one sanctioned restart. See the
+GCP/Colab action plan's gates and calendar.
+
+**Resolved:** the normalisation scheme ambiguity (inconsistency #7) is now moot for
+*this* run — since preprocessing is being redone from raw data on GCP, notebook 03's
+z-score scheme is simply adopted as canonical from the start (no legacy `_zero`/`_norm`
+files exist to conflict with it). `denormalize_dm_maps` (`x·std+mean`, both channels)
+is the only denormalisation path needed. Still worth a one-line note in the thesis
+that this inconsistency existed and was resolved by convention, not measurement.
 
 ### Status
 
@@ -30,11 +53,11 @@ Cluster action plan below.
 | §2.6a Numba JIT | ✅ Skipped — scipy owns 67% of cost, accumulation < 3% |
 | §2.6b–c NumPy vectorisation + ℓ-bin precompute | ✅ Complete |
 | §2.6f `torch.compile` sampling | ✅ Complete (opt-in `--compile` flag) |
-| Post-sampling rescaling (inconsistency #4) | ✅ Opt-in `--rescale-cib`/`--rescale-tsz` flags added (off by default); apply/omit decision deferred to cluster day |
+| Post-sampling rescaling (inconsistency #4) | ✅ Opt-in `--rescale-cib`/`--rescale-tsz` flags added (off by default); decide on/off once real samples exist — see GCP/Colab action plan |
 | Test hardening | ✅ Distinct-channel cross-moment tests + non-Gaussian (lognormal) fixture added |
-| §3.2 `n_jobs` parallelisation (all functions) | ✅ Complete |
+| §3.2 `n_jobs` parallelisation (all functions) | ✅ Complete — usable as-is on the GCP VM's CPUs for statistics notebooks |
 | §3.3 GPU port `map2cl_torch` | ✅ Complete |
-| §3.9 Parallel benchmarks | ◑ Partial — Fig 11 (strong scaling) + summary table done on local CPU; Figs 12–15 cluster-dependent |
+| §3.9 Parallel benchmarks | ◑ Partial — Fig 11 (strong scaling) + summary table done on local CPU; Figs 12–15 **dropped** (needed multi-node access, now permanently unavailable) |
 | §6.1–6.4 CI foundation (tests.yml + lint.yml) | ✅ Complete |
 | §6.5 Additional CI/CD | ✅ Complete — pip-audit, dependency-review, pre-commit, docs build CI, equivalence gate in CI, `twine check`, concurrency groups |
 | §7 Codebase cleanup | ✅ Complete (+ removed stale root `sample.py` and empty `diffusion.py`) |
@@ -42,184 +65,348 @@ Cluster action plan below.
 | §9 Notebook variable naming consistency | ✅ Complete |
 | §4 Documentation + ReadTheDocs | ✅ Complete — guides (incl. background, contributing), API prose, module docstrings, notebook summaries 01–14, RTD theme, docs CI with `-W`/`fail_on_warning` |
 | §5 PyPI distribution | ✅ Complete (publish.yml + Trusted Publisher; `v0.1.0` live on PyPI, `v0.1.1` tagged) |
-| ⚠ Normalisation scheme (inconsistency #7) | **BLOCKER** — notebooks 03/06 disagree; resolve on the cluster before trusting statistics (see Cluster action plan) |
-| §3.4–3.5 Multi-GPU + MPI evaluation | To do (cluster dependent) |
-| §3.7 SLURM array eval jobs | To do (needs `eval.py`; optional — notebooks 06–09 are the critical path) |
+| Normalisation scheme (inconsistency #7) | ✅ Resolved by convention — z-score both channels (notebook 03), no legacy files to reconcile |
+| Data transfer (halo lightcones + raw CIB/tSZ FITS) | ◑ In progress on GCP VM — 75 MB/s measured, completes the evening of Fri 3 Jul — see GCP/Colab action plan Step 0 |
+| §01–03 Preprocessing (must rerun on raw data) | To do — critical path, GCP VM |
+| DDPM training from scratch | To do — critical path, Colab Pro Plus, biggest schedule risk |
+| Sampling → statistics (06–09) → figures (14) | To do — critical path |
+| §3.4–3.7 Multi-GPU + MPI + SLURM arrays | **Out of scope** — no multi-node access on Colab/GCP; kept as reference only |
 
 ---
 
-## Cluster action plan — when the cluster comes back online
+## GCP / Colab action plan — no HPC, 9 days, from raw data
 
-**Deadline: 2026-07-08. Time budget: run sampling first, then statistics in
-parallel, then paper figures. Everything below is copy-paste ready.**
+**Deadline: 23:59 BST, 2026-07-12.** This section replaces the old cluster action
+plan entirely. It assumes zero prior artefacts: no checkpoint, no preprocessed
+`.npy` patches. Everything downstream of the raw Agora files must be (re)built.
+There is no SLURM, no multi-node, and (on Colab) only one GPU at a time — §3.4,
+§3.5, and §3.7 below no longer apply to this run; ignore their SLURM/MPI-specific
+commands.
 
-The cluster action plan is the only remaining critical-path work. §3.4, §3.5,
-and §3.7 below contain the supporting code; this section is the operational
-checklist.
+**Hard constraints this plan is built around:**
 
-> **⚠ BLOCKER — resolve before Step 2 (statistics).** The tutorial notebooks
-> disagree on normalisation (see inconsistency #7 in
-> `docs/paper_code_inconsistencies.md`). Notebook 03 z-scores **both** channels
-> and saves `..._zscore_...` files + `norm_params = [cib_mean, cib_std,
-> tsz_mean, tsz_std]`; notebook 06 loads legacy `..._minmax_..._zero`/`_norm`
-> filenames that 03 does not produce. On login, run
-> `ls data/low_pass/2mJy/*.npy` and confirm **which files actually exist** and
-> **which normalisation the checkpoint was trained with**. A z-score-trained
-> model must be denormalised with `denormalize_dm_maps` (`x·std+mean`, both
-> channels), never `renormalize_dm_maps`. Align the load filenames in notebooks
-> 06–14 to the real ones before trusting any figure's absolute amplitude.
->
-> **Critical path = notebooks 06–09 run interactively (Step 2).** `eval.py`
-> (§3.10) and the SLURM array (§3.7) are *optional* convenience for multi-checkpoint
-> convergence plots and are **not** required for the core thesis figures.
+- **Deadline:** report + executive summary, 23:59 BST Sun 12 Jul. Internal
+  target: **submit by ~18:00 Sun 12 Jul** — never plan to the wire.
+- **No computer access Sat 4 Jul 09:00–14:00** (this Saturday only; 11 Jul is
+  unaffected). Long unattended jobs are scheduled to span that window; nothing
+  interactive is.
+- **Report status:** largely drafted (`report/main.tex`) and already under
+  review. The writing work below is integrating results/figures into the
+  existing draft and responding to review comments — not fresh drafting.
+  Results-independent review comments can be cleared in the gaps (Sun/Wed
+  evenings).
+- **Wed 8 Jul: coursework presentation** (15 min talk + 10 min questions,
+  30 min travel each way). Budget: 2–3 h slide prep Tue evening (timeboxed —
+  the coursework itself is already complete), 1 h rehearsal Wed morning, ~3 h
+  midday block for travel + delivery. Wednesday is a half-day by design; only
+  unattended compute runs that day.
+- **GCP free trial** ($300 credit / 90 days): **no GPUs at all** (GPU quota is
+  0 on trial accounts and cannot be raised without upgrading to paid) and a
+  concurrent-vCPU cap (assume 8). Consequence: *all* GPU work happens on Colab
+  Pro Plus; the GCP VM does storage, preprocessing, and CPU statistics with
+  `N_JOBS = 8`.
+- **Colab Pro Plus** (~$50/mo, reimbursed — note there is no free trial of
+  Pro+ itself): background execution (keeps running with the browser closed),
+  **24 h max per session**, priority A100 access, ~500 compute units/month
+  (A100 ≈ 8–13 units/h → the allowance covers roughly 40–60 h of A100). One
+  full training run + sampling fits inside it; pay-as-you-go top-ups
+  ($9.99/100 units) are the rerun contingency.
 
-### Step 0 — First things on login
+**Calendar — two tracks (unattended compute vs. your attention):**
 
-```bash
-# Pull latest code and activate the project env
-cd ~/projects/cmb_foregrounds_diffusion
-git pull
-source ~/activate_diffusion_project_env.sh
+| Day | Unattended compute | Your time |
+|---|---|---|
+| **Fri 3 Jul** (tonight) | Transfer finishes: ~1.85 TB remaining at 75 MB/s ≈ 7 h → late evening. Then **notebook 01 runs overnight in `tmux`** (single scan of all ~2 TB of lightcone slices). | Pre-flight checklist below: buy Colab Pro+, create GCS bucket, `--resume` in `train.py` (✅ done), Colab GPU smoke test with synthetic data → measure steps/s. Verify transfer (Gate A) before bed and start NB01. Fallback: start NB01 before 09:00 Sat — it completes during the blocked window either way. |
+| **Sat 4 Jul** (blocked 09–14) | NB01 completes during the blocked morning. | 14:00–: NB02 (masking — the RAM-heavy, semi-interactive one), then NB03 (patch extraction); Gate B sanity checks; push `.npy` patches to GCS + Drive; **~21:00 launch training session #1** on Colab (background execution). Delete the lightcone slices once NB01's output is verified. |
+| **Sun 5 Jul** | Training all day; at the 24 h cap (~Sat launch + 24 h) start **session #2 with `--resume`** (~15 min: new runtime, restore checkpoint from GCS, relaunch). | Light day: Gaussian baseline on the VM (CPU); check W&B loss + milestone sample grids 2–3×; stage the stats notebooks (paths, `N_JOBS`); optionally update the draft's methods/data sections for the GCP/Colab pipeline and clear results-independent review comments. |
+| **Mon 6 Jul** | Training completes (est. 18–30 A100-hours total for 100k steps). | On completion: **sample** (DDIM-250, 640 maps ≈ 1 h); decide `--rescale-*` (inconsistency #4) from a quick power-spectrum check; **kick off stats 06–09 overnight** on the VM (`nbconvert` in `tmux`). |
+| **Tue 7 Jul** | Stats 06–09 finish; reruns as needed. | Review stats outputs; first pass of NB14 figures. Evening: presentation slides (timeboxed 2–3 h). **22:00 = hard training cutoff (Gate C)** if the GPU-scarcity case materialised: take the best milestone, sample overnight. |
+| **Wed 8 Jul** (presentation) | Any stats/sampling reruns run unattended during the day. | Rehearse a.m.; travel + deliver 15+10 + travel back (~3 h); evening (light): review figures, clear results-independent review comments. |
+| **Thu 9 Jul** | Extensions 10–12 overnight *if Gate D passes*. | Finalise NB14 paper figures → `plots/paper/`. **Gate D** (morning): core solid → launch extensions unattended; either way, fold results + figures into the existing draft the rest of the day. |
+| **Fri 10 Jul** | Idle / extension stragglers. | **Integrate & respond.** Results/discussion + figures into the reviewed draft; remaining review comments; update the executive summary. Submission-ready by tonight (Gate E). Run `/verify-citations`. |
+| **Sat 11 Jul** | — | Full day available: polish pass — figures, references, formatting, tighten the executive summary; absorb any slip. |
+| **Sun 12 Jul** | — | Fresh-eyes read-through, final fixes, **submit by ~18:00** (≥ 6 h spare). |
 
-# Verify GPU availability and check what checkpoint exists
-squeue -u $USER
-ls results/*/model-*.pt | sort -V | tail -5
-nvidia-smi   # if on a login node with GPUs
-```
+Buffer accounting: on the expected path the core pipeline is done Thursday and
+a submission-ready draft exists Friday night — roughly two clear days of
+slack, helped by the report being largely written and under review already.
+On the worst sanctioned path (Tue 22:00 cutoff), stats land Wed night, figures
+Thu–Fri, and integration still finishes inside the weekend (all of Saturday is
+free) with Sunday as polish-only.
 
-Identify the best checkpoint. The default is `results/v3_zscore_no_cib_cluster_mask/model-20.pt`.
-Confirm it exists and note its path — you will use it in every command below.
+**Decision gates:**
+
+- **Gate A (Fri night):** transfer verified — file count against the source
+  listing, spot-`np.load` a few slices, open both FITS maps in astropy and
+  check NSIDE → start NB01 overnight.
+- **Gate B (Sat evening):** patches sane — expected count, no NaNs,
+  per-channel mean ≈ 0 / std ≈ 1 (z-score), eyeball a handful → launch
+  training. A failure costs ≤ 12 h (fix Sat night, launch Sun morning); the
+  schedule absorbs it.
+- **Gate C (training):** converged early → sample early, everything shifts
+  left. Not converged by **Tue 7 Jul 22:00** → stop and take the best
+  milestone. **≥ 40k steps is the acceptable floor**; document the compressed
+  training budget as an explicit limitation in the report — a legitimate
+  consequence of the migration, not a hidden shortcut. If the loss *diverges*
+  mid-run, exactly one sanctioned restart from the last good milestone at
+  `--lr 5e-5`; there is no time for a second.
+- **Gate D (Thu morning):** stats 06–09 + figure drafts solid → run the
+  extensions **in priority order: 10 (peak/minima) → 11 (scattering) →
+  12 (Minkowski tensors) → multi-milestone convergence figure**. All CPU-only
+  and unattended on the VM — the real cost is analysis/writeup attention,
+  which is why this gate exists. Core not solid → skip all extensions.
+- **Gate E (Fri night):** the reviewed draft has results integrated and is
+  submission-ready. If not, cut extensions from the report scope and finish
+  the integration on Saturday (fully free); Sunday stays polish-only.
+
+**Set the step budget from measured throughput.** The Friday-night smoke test
+gives real steps/s on the assigned GPU. At Saturday's launch set
+`--steps ≈ steps_per_sec × 3600 × 44` (≈ hours from Sat 21:00 to Mon 17:00),
+capped at 100k. At ~1.0 steps/s (a reasonable A100 expectation for batch 16 ×
+grad-accum 2, bf16, flash attention) 100k fits with margin; at ~0.5 steps/s set
+75–80k up front rather than discovering the shortfall on Monday.
+
+**Cost envelope (GCP free trial, ~10 days):** e2-highmem-8 ≈ $0.36/h run only
+when needed (~5 days of on-time ≈ $45); 2–2.5 TB persistent disk ≈ $30–80 for
+the window, dropping to pennies once the lightcone slices are deleted after
+NB01; GCS artifacts (≤ 50 GB: patches, checkpoints, samples) < $2. Total ≈
+**$60–130 of the $300 credit**. Stop (don't delete) the VM between sessions —
+the disk persists. Colab Pro+ and any unit top-ups are reimbursed separately.
+
+**Risk register:**
+
+| Risk | Mitigation |
+|---|---|
+| A100 scarce → landed on L4/V100 (3–4× slower) | Measure steps/s at launch and size `--steps` to finish by Mon evening; Tue 22:00 cutoff backstops |
+| Colab 24 h session cap / random disconnect | `--resume` flag (built and tested tonight) + every-milestone checkpoints synced to GCS |
+| Google Drive 15 GB free cap vs. ~20 × ~1 GB milestones | GCS is the checkpoint archive; keep at most the last 2–3 milestones on Drive |
+| NB02 RAM blowout (full-sky NSIDE 8192) | 64 GB VM + 64 GB swapfile, float32, process CIB and tSZ sequentially with `del`/`gc`; last resort: rebuild as `n2-custom` 8 vCPU with extended memory (~96 GB) — still inside the trial vCPU cap |
+| Training divergence | W&B loss + milestone sample grids; one restart at `lr=5e-5` from the last good milestone (Gate C) |
+| Compute units exhausted mid-run | Top up $9.99/100 (reimbursed); keep all CPU work on the VM to conserve units; `runtime.unassign()` the moment a GPU job finishes |
+| Results integration overruns into the weekend | Gate E: submission-ready Fri night; all of Sat 11 + Sun 12 are free for recovery and polish |
+| Presentation prep creep | Timebox: 2–3 h slides Tue evening + 1 h rehearsal Wed morning — the material already exists |
+
+**Definition of done (key elements — all mandatory):**
+
+1. z-score patches from NB03, archived to GCS (+ Drive copy)
+2. Trained checkpoint (target 100k steps; ≥ 40k floor per Gate C)
+3. ≥ 640 DDPM samples + Gaussian baseline
+4. Statistics 06–09 outputs over Agora vs. DDPM vs. Gaussian
+5. Paper figures (NB14) in `plots/paper/`
+6. Report + executive summary submitted (target Sun ~18:00)
+
+Extensions (Gate D only, in order): NB10 → NB11 → NB12 → convergence figure.
+
+**Tonight's pre-flight checklist (Fri 3 Jul — all of it runs while the transfer finishes):**
+
+1. Buy Colab Pro Plus; confirm an A100 runtime attaches; store `WANDB_API_KEY`
+   as a Colab secret.
+2. Create the GCS bucket for artifacts (patches, checkpoints, samples).
+3. ✅ **`--resume` implemented and verified (3 Jul).** `train.py` now finds
+   the latest `results/<run>/model-*.pt` and calls `trainer.load()`; errors
+   loudly if `--resume` is given but no checkpoint exists. Added alongside:
+   `--save-every` (checkpoint cadence, default 5000) and `--num-samples`
+   (milestone sampling count, `0` skips sampling entirely — used by smoke
+   tests), and W&B now resumes into the same run (`id=run_name,
+   resume="allow"`) so the loss curve stays continuous across sessions.
+   Save→load→continue verified locally with synthetic data.
+4. Build the Colab training notebook: clone repo → `pip install -e .` → pull
+   patches from Drive/GCS → `accelerate launch train.py --run-name colab_v1
+   --wandb` → checkpoint-sync loop (`gsutil` newest milestone to GCS) →
+   `runtime.unassign()` on completion so an idle GPU doesn't burn units.
+5. Run a ~50-step smoke test on the assigned GPU with synthetic
+   `(N, 2, 256, 256)` data: proves the env, W&B logging, checkpoint
+   save/resume, GCS sync, and that flash attention works on the assigned GPU
+   type — and **measures steps/s** for the step-budget rule above.
+6. Recreate the venv on the GCP VM (`pip install -e ".[dev]"` + `healpy`); add
+   the swapfile: `sudo fallocate -l 64G /swapfile && sudo chmod 600 /swapfile
+   && sudo mkswap /swapfile && sudo swapon /swapfile`.
+7. At Gate A, start NB01 in `tmux`:
+   `jupyter nbconvert --to notebook --execute --inplace docs/tutorials/01_*.ipynb`.
 
 ---
 
-### Step 1 — Sample (submit immediately)
+### Step 0 — Finish the data transfer
 
-Edit `sample_slurm.sh` and set:
+In progress (2026-07-03): halo lightcone slices (`haloslc_rot_*.npz`, ~2 TB)
+plus the two raw full-sky FITS maps (`agora_len_mag_cibmap_act_150ghz.fits`
+Jy/sr, `agora_ltszNG_bahamas80_bnd_unb_1.0e+12_1.0e+18_lensed.fits`) — see
+Globus paths in `README.md` §Data. Measured 75 MB/s with 160 GB done →
+~7 h remaining → **completes late Friday evening**. Keep it in a persistent
+job (`tmux`/Globus CLI) and verify at Gate A: file count against the source
+listing, spot-`np.load` a few slices, open both FITS maps with astropy and
+check NSIDE. If either FITS map is not in the transfer queue yet, add it now —
+notebooks 02–03 depend on them.
+
+Once NB01's filtered halo catalogue is verified (it is only a few MB),
+**delete the lightcone slices** — nothing downstream reads them again, and
+2 TB of persistent disk is the single biggest line on the trial credit.
 
 ```bash
-CHECKPOINT="results/v3_zscore_no_cib_cluster_mask/model-20.pt"
-OUTPUT="data/low_pass/2mJy/samples_v3_ddpm1000.npy"
-BATCHES=40        # 40 × 16 × 4 GPUs = 2560 samples
-BATCH_SIZE=16
-SAMPLING_TIMESTEPS=""   # full DDPM (1000 steps); or set to 250 for DDIM
-USE_WANDB="false"
+# Example: sync a local/VM staging directory to a GCS bucket once Globus lands the files
+gsutil -m rsync -r ~/agora_raw gs://<your-bucket>/agora_raw
 ```
 
-Then submit:
-```bash
-sbatch sample_slurm.sh
-```
-
-While this runs (expected: ~2 h on 4 A100s for 2560 samples at 1000 steps,
-~30 min for 250-step DDIM), proceed to Step 2 to set up the statistics run.
-
-Also generate a Gaussian baseline if one does not already exist at
-`data/low_pass/2mJy/gaussian_cib_tsz_2mJy_lp.npy` — see tutorial 05 section
-on Gaussian baseline generation.
+Storage layout: raw FITS (+ lightcones until NB01 finishes) on the VM's
+persistent disk; final `.npy` training arrays (~1–2 GB) mirrored to Google
+Drive so Colab can mount them directly; **checkpoints archived to GCS, not
+Drive** — free Drive is 15 GB and up to 20 milestones × ~1 GB would blow it
+(keep at most the last 2–3 on Drive). Losing a checkpoint to an ephemeral
+Colab runtime a second time would be fatal to the schedule.
 
 ---
 
-### Step 2 — Run statistics notebooks (as soon as samples land)
+### Step 1 — Preprocessing from raw data (notebooks 01–03)
 
-Notebooks 06–12 are independent of each other and can be submitted as
-separate SLURM jobs or run interactively in a Jupyter session. Minimum
-required for the thesis figures: **06, 07, 08, 09**. Notebooks 10–12 are
-extended statistics.
+Run on the GCP VM (CPU is sufficient; `healpy` at NSIDE=8192 wants RAM, not
+GPU). The free-trial vCPU cap makes **e2-highmem-8 (8 vCPU / 64 GB)** the
+practical ceiling — add the pre-flight swapfile as insurance, keep maps
+float32, process CIB and tSZ sequentially with `del`/`gc` between them, and
+stop the VM whenever it is idle. Notebook 01 is a pure batch scan of the
+lightcones: run it overnight Friday via `nbconvert` in `tmux` (see calendar);
+02–03 are the interactive Saturday-afternoon work.
 
-Notebook dependencies:
-- 06, 07, 08, 09, 10, 11, 12 all load `samples_v3_ddpm1000.npy` — run
-  after Step 1 completes.
-- 14 (paper figures) depends on outputs from 06–09.
-
-**Interactive Jupyter session (if cluster allows):**
 ```bash
-# Request an interactive GPU node
-srun --account=mphil-dis-sl2-gpu --partition=ampere \
-     --gres=gpu:1 --cpus-per-task=8 --mem=64G --time=04:00:00 \
-     --pty bash
-
-source ~/activate_diffusion_project_env.sh
-cd ~/projects/cmb_foregrounds_diffusion
-jupyter lab --no-browser --port=8888 &
-# Then SSH tunnel: ssh -NL 8888:localhost:8888 <cluster>
+cd ~/cmb_foregrounds_diffusion
+source activate_diffusion_project_env.sh   # or recreate the venv fresh on the VM
+pip install -e ".[dev]"
 ```
 
-Run notebooks 06–09 first (core paper statistics). Then 10–12 if time
-permits. Then 14 to generate the final paper figures.
+1. **`01_halo_catalogue.ipynb`** — concatenate + filter `haloslc_rot_*.npz` to
+   `data/halo_catalogue/halo_catalogue_m500gt3e14.npz` (M₅₀₀c ≥ 3×10¹⁴ M☉).
+2. **`02_masking.ipynb`** — load the two raw FITS maps, apply 2 mJy point-source
+   masking at full NSIDE=8192, inpaint, degrade to NSIDE=2048, apply the
+   apodised cluster mask, convert to μK. This is the most memory-hungry step.
+3. **`03_patch_extraction.ipynb`** — extract 6°×6° patches at 256×256, low-pass
+   filter at ℓ=7000, **z-score both channels** (this is now the only scheme in
+   play — no need to reconcile against notebook 06's legacy min-max path), save
+   `CIB_map_150GHz_256_st6_zscore_2mJy_lp.npy` and
+   `tSZ3_map_150GHz_256_st6_zscore_2mJy_lp.npy` under `data/low_pass/2mJy/`.
 
-**Alternatively, convert and run as SLURM batch jobs:**
+Copy the resulting `.npy` files to Google Drive (or GCS) immediately — this is
+the one artefact that must not be lost twice.
+
+---
+
+### Step 2 — Train from scratch on Colab Pro Plus
+
+Colab Pro Plus gives priority access to A100/V100 GPUs and background execution
+(the notebook keeps running after the tab/browser closes, for longer than plain
+Colab Pro). Use background execution — do not rely on keeping a browser tab open
+for a multi-day training run.
+
+```python
+# In a Colab cell, after mounting Drive and cloning the repo:
+from google.colab import drive
+drive.mount('/content/drive')
+
+!git clone https://github.com/<you>/cmb_foregrounds_diffusion.git
+%cd cmb_foregrounds_diffusion
+!pip install -e ".[dev]"
+
+# Symlink the preprocessed data from Drive into the expected path
+!mkdir -p docs/tutorials/data/low_pass/2mJy
+!cp /content/drive/MyDrive/cmb_data/*.npy docs/tutorials/data/low_pass/2mJy/
+```
+
 ```bash
-# One SLURM job per notebook — submit all at once after samples land
+!accelerate launch train.py --run-name colab_v1 --wandb
+```
+
+Set `WANDB_API_KEY` first (as a Colab secret) so loss curves and milestone
+sample grids are visible from any device — including your phone during the
+Saturday-morning block and on presentation day. Checkpoint every milestone off
+the runtime disk — the runtime is ephemeral. **GCS is the archive** (not
+Drive; see Step 0 storage layout):
+
+```python
+# Sync cell — run after each milestone lands (or loop it in the background)
+from google.colab import auth; auth.authenticate_user()
+!gsutil -m rsync -x ".*sample-.*" results/colab_v1 gs://<bucket>/checkpoints/colab_v1
+```
+
+**Session lifecycle (24 h cap):** stock `train.py` starts from step 0 every
+time — the `--resume` flag added in the Friday-night pre-flight (finds the
+latest `results/<run>/model-*.pt` and calls `trainer.load(<milestone>)`) is
+what makes the 24 h session cap and random disconnects survivable. To resume:
+new runtime → restore `results/colab_v1/` from GCS → re-run the same
+`accelerate launch` command with `--resume` (~15 min end to end). When
+`trainer.train()` returns, call `google.colab.runtime.unassign()` in the
+notebook so an idle A100 doesn't keep burning compute units.
+
+**Step budget:** set `--steps` at launch from the smoke-test throughput
+(`steps_per_sec × 3600 × 44`, capped at 100k — see the calendar note). If the
+run is behind at the **Tue 7 Jul 22:00 cutoff (Gate C)**, stop and take the
+best milestone — a less-converged model with real statistics beats no model.
+≥ 40k steps is the floor; below that, still proceed but say so plainly in the
+report.
+
+---
+
+### Step 3 — Sample + Gaussian baseline
+
+```bash
+accelerate launch foregrounds_diffusion/sample.py \
+  --checkpoint results/colab_v1/model-<best>.pt \
+  --batches 40 --batch-size 16 \
+  --output data/low_pass/2mJy/samples_colab_v1.npy \
+  --sampling-timesteps 250   # DDIM — ~4x faster than full 1000-step DDPM, no retraining needed
+```
+
+Single-GPU on Colab: 640 samples ≈ 1 h at DDIM-250 on an A100 (≈ 25 compute
+units); 2560 ≈ 3–4 h. Top up to 2560 only if training finished early — never
+at the expense of the Monday-night statistics window. Sampling is also the one
+GPU job that can run unattended on presentation day (Wed) in the Gate C worst
+case. Generate the Gaussian baseline (tutorial 05) on the VM CPU on Sunday at
+`data/low_pass/2mJy/gaussian_cib_tsz_2mJy_lp.npy` — it needs only the Agora
+patches' power spectra, not the GPU or the trained model.
+
+Decide the `--rescale-cib`/`--rescale-tsz` question (inconsistency #4) once real
+samples exist, by comparing sample power spectra against the Agora input before
+committing to a figure.
+
+---
+
+### Step 4 — Statistics notebooks (06–09 minimum)
+
+Run interactively in Colab or on the GCP VM (statistics are CPU-bound; use the
+`n_jobs` parallelisation already in the codebase — no GPU needed here except for
+`map2cl_torch`/scattering transforms, which fall back to CPU fine at this sample
+count):
+
+```python
+N_JOBS = -1   # use all VM/Colab CPU cores
+```
+
+Run them unattended on the VM overnight (Mon → Tue):
+
+```bash
+tmux new -s stats
 for NB in 06 07 08 09; do
-    sbatch --wrap="source ~/activate_diffusion_project_env.sh && \
-        jupyter nbconvert --to notebook --execute \
-        --ExecutePreprocessor.timeout=7200 \
-        --ExecutePreprocessor.kernel_name=python3 \
-        --inplace docs/tutorials/${NB}_*.ipynb" \
-        --account=mphil-dis-sl2-gpu --partition=ampere \
-        --gres=gpu:1 --cpus-per-task=8 --mem=64G --time=04:00:00 \
-        --output=logs/nb_${NB}_%j.out
+  jupyter nbconvert --to notebook --execute --inplace \
+    --ExecutePreprocessor.timeout=14400 docs/tutorials/${NB}_*.ipynb
 done
 ```
 
-Each notebook saves its figures to `plots/` and its computed statistics to
-intermediate `.npy` / `.npz` files — check the output path in the first
-config cell of each notebook.
+Minimum required for the report figures: **06, 07, 08, 09**. Notebooks 10–12
+(peak/minima counts, scattering, Minkowski tensors) are the time-permitting
+extensions — launch them with the same pattern only via **Gate D** (Thu
+morning), in the order 10 → 11 → 12, followed by the multi-milestone
+convergence figure if there is still slack. Then run **14** on Thursday to
+assemble the final paper figures into `plots/paper/` (PDF + 300dpi PNG).
 
 ---
 
-### Step 3 — Multi-GPU statistics (§3.4)
-
-For the computationally heavy statistics (Minkowski tensors, cross-moments)
-over the full 2560-sample set, use the joblib parallel wrapper that's already
-in the codebase. The `n_jobs` parameter is available on:
-- `compute_minkowski_tensors` — pass `n_jobs=-1`
-- `compute_cross_moments` — use `parallel_cross_moments` wrapper (§3.2)
-- `compute_peak_minima_counts` — pass `n_jobs=-1`
-
-In each statistics notebook, set at the top:
-```python
-N_JOBS = 16   # or however many CPUs the SLURM job was allocated
-```
-and pass it to the relevant calls. The notebooks already import `joblib` via
-the module functions — no extra setup needed.
-
----
-
-### Step 4 — SLURM array over checkpoints (§3.7, optional)
-
-If time permits and you want statistics at multiple training milestones
-(to show convergence in the thesis), see the `eval_slurm_array.sh` template
-in §3.7 below. This requires `eval.py` (§3.10 step 5), which has not yet
-been written — skip this step unless convergence plots are needed for the thesis.
-
----
-
-### Step 5 — Paper figures (notebook 14)
-
-Run tutorial 14 last, after 06–09 have finished. It loads the precomputed
-statistics from those notebooks and assembles the final paper figures.
-
-Check `14_paper_figures.ipynb` cell 1 for the paths it expects. Update
-`CHECKPOINT` and the sample file path to match what was generated in Step 1.
-
-All figures are saved to `plots/paper/` as both PDF (for LaTeX) and PNG
-(300 dpi backup). Commit the figures directory to a separate branch or
-attach to the thesis submission — do NOT commit large PDFs to `main`.
-
----
-
-### What is already done (no cluster needed)
+### What is already done (unaffected by the migration)
 
 | Item | Status |
 |---|---|
-| Trained checkpoint `v3_zscore_no_cib_cluster_mask/model-20.pt` | ✅ On cluster |
-| `sample_slurm.sh` with DDIM flag | ✅ Ready to submit |
 | DDIM sampling (`--sampling-timesteps 250`) | ✅ Implemented and tested |
-| Statistics modules (06–12) | ✅ All notebooks complete |
+| `--compile` (torch.compile U-Net) | ✅ Opt-in flag on `sample.py`, may help on a single Colab GPU |
+| Statistics modules (06–12) | ✅ All notebooks complete, just need real sample data |
 | Paper figures notebook (14) | ✅ Written, needs sample data |
-| `n_jobs` on `compute_minkowski_tensors`, `compute_cross_moments`, `compute_peak_minima_counts`, `select_snr_pixels` | ✅ In codebase |
-| `map2cl_torch` GPU port | ✅ In codebase, equivalence-tested |
+| `n_jobs` on `compute_minkowski_tensors`, `compute_cross_moments`, `compute_peak_minima_counts`, `select_snr_pixels` | ✅ In codebase, works on any CPU (GCP VM or Colab) |
+| `map2cl_torch` GPU port | ✅ In codebase, equivalence-tested, works on Colab's single GPU |
 | All statistics unit-tested | ✅ 125 tests pass |
 
 ---
@@ -2383,10 +2570,16 @@ Fix in both notebooks before any other changes in this phase.
 13. ✅ **Test hardening + opt-in `--rescale`** — distinct-channel/non-Gaussian tests; inconsistency #4 flag.
 14. ✅ **CI/CD hardening** — §6.5; equivalence gate in CI, docs `-W`, `twine check`, concurrency.
 
-**Remaining (cluster-dependent, see Cluster action plan):**
+**Remaining (GCP/Colab migration, see GCP / Colab action plan — deadline 23:59 BST 2026-07-12):**
 
-15. ⚠ **Resolve normalisation #7** — confirm on-disk files + checkpoint training scheme *before* running statistics. ← Next (on cluster login)
-16. **Sample → statistics → paper figures** — notebooks 06–09 are the critical path; 10–14 if time permits.
-17. **MPI wrapper + eval SLURM array job** — §3.5/3.7; needs `eval.py`; optional (convergence plots).
-18. **Multi-node training SLURM script** — §3.6; **deferred post-thesis** (single GPU suffices).
-19. **Cython (§2.6g), remaining §3.9 parallel figures (12–15)** — post-thesis / cluster.
+15. **Finish raw data transfer to GCP** — halo lightcones + raw CIB/tSZ FITS. ← In progress
+16. **Rerun preprocessing from raw data** — notebooks 01–03 on the GCP VM; no preprocessed `.npy` files survive the HPC loss.
+17. **Train DDPM from scratch on Colab Pro Plus** — no checkpoint survives the HPC loss; biggest schedule risk, see contingency in the action plan.
+18. **Sample → statistics → paper figures** — notebooks 06–09 are the critical path; 10–14 if time permits.
+19. **Write report + executive summary** — reserve Days 8–9 regardless of how much of 15–18 slips.
+
+**Permanently out of scope (no longer applicable — Colab/GCP has no multi-node access):**
+
+20. ~~MPI wrapper + eval SLURM array job~~ — §3.5/3.7; needed CSD3 multi-node access.
+21. ~~Multi-node training SLURM script~~ — §3.6; needed CSD3 multi-node access.
+22. ~~Cython (§2.6g), remaining §3.9 parallel figures (12–15)~~ — post-thesis nice-to-have only, not on the critical path.

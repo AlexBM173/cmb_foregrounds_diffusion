@@ -24,3 +24,8 @@ docs/_build/
 # Coverage and local agent worktrees
 .coverage
 .claude/
+# report/ is still a work-in-progress draft (handbook/example PDFs, scratch
+# citation-audit output, etc. alongside the actual report source). Ignored
+# for now; unignore once the report is finalised and the non-deliverable
+# contents have been removed.
+report/

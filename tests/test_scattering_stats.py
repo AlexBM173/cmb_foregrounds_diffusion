@@ -61,20 +61,13 @@ def test_get_backend_raises_when_both_absent():
 
 def test_get_backend_import_error_message():
     """ImportError message should mention both backend options."""
-    # Temporarily remove both from sys.modules to simulate absence.
-    saved = {}
-    for key in list(sys.modules):
-        if key == "scattering" or key.startswith("kymatio"):
-            saved[key] = sys.modules.pop(key)
-    try:
+    # A None entry in sys.modules makes `import <name>` raise ImportError,
+    # simulating absence even when the package is actually installed.
+    with mock_patch.dict(sys.modules, {"scattering": None, "kymatio": None}):
         with pytest.raises(ImportError) as exc_info:
             ss._get_backend()
-        msg = str(exc_info.value)
-        assert "scattering" in msg.lower() or "kymatio" in msg.lower()
-    except ImportError:
-        pass  # backend IS installed — message test is moot
-    finally:
-        sys.modules.update(saved)
+    msg = str(exc_info.value)
+    assert "scattering" in msg.lower() and "kymatio" in msg.lower()
 
 
 # ---------------------------------------------------------------------------

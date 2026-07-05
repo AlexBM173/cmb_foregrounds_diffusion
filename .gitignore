@@ -21,6 +21,10 @@ plots/benchmarks/*.pdf
 plots/benchmarks/*.png
 # Sphinx build output
 docs/_build/
+# Local data and pipeline run artefacts (patches live in GCS; runs/ holds
+# per-run stat caches, checkpoints and figures)
+docs/tutorials/data/
+runs/
 # Coverage and local agent worktrees
 .coverage
 .claude/

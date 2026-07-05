@@ -34,9 +34,16 @@ import yaml
 KNOWN_STATISTICS = {
     "power_spectrum": {"lmin", "lmax", "binsize", "n_maps"},
     "cross_spectrum": {"lmin", "lmax", "binsize", "n_maps"},
-    "moments": {"n_bands", "lmin", "lmax", "n_maps"},
-    "cross_moments": {"n_bands", "lmin", "lmax", "n_maps"},
+    "moments": {"n_bands", "lmin", "lmax", "n_maps", "noise_tiers"},
+    "cross_moments": {"n_bands", "lmin", "lmax", "n_maps", "noise_tiers"},
     "minkowski_functionals": {"n_thresholds", "threshold_min", "threshold_max", "n_maps"},
+    "minkowski_tensors": {
+        "n_thresholds",
+        "threshold_min",
+        "threshold_max",
+        "tensor_types",
+        "n_maps",
+    },
     "pixel_histograms": {"n_bins", "cib_range", "tsz_range", "smooth_sigma", "n_maps"},
     "peak_counts": {
         "smoothing_fwhm_arcmin",
@@ -204,6 +211,8 @@ class EvaluationConfig:
     """Which statistics to compute and their parameters (``evaluation`` section)."""
 
     n_jobs: int = 8
+    ilc_noise_file: str = "data/ilc/ilc_weights_residuals_agora_fg_model.npy"
+    noise_seed: int = 42
     statistics: list[str] = field(
         default_factory=lambda: [
             "power_spectrum",
@@ -338,6 +347,10 @@ def _parse(raw: dict, source: Path | None) -> PipelineConfig:
     eval_raw = dict(raw.get("evaluation") or {})
     _require(isinstance(eval_raw, dict), "evaluation: expected a mapping")
     n_jobs = eval_raw.pop("n_jobs", 8)
+    ilc_noise_file = eval_raw.pop(
+        "ilc_noise_file", "data/ilc/ilc_weights_residuals_agora_fg_model.npy"
+    )
+    noise_seed = eval_raw.pop("noise_seed", 42)
     statistics = eval_raw.pop("statistics", None)
     params = {}
     for name, stat_cfg in eval_raw.items():
@@ -349,7 +362,9 @@ def _parse(raw: dict, source: Path | None) -> PipelineConfig:
         stat_cfg = stat_cfg or {}
         _check_keys(stat_cfg, KNOWN_STATISTICS[name], f"evaluation.{name}")
         params[name] = dict(stat_cfg)
-    evaluation = EvaluationConfig(n_jobs=n_jobs, params=params)
+    evaluation = EvaluationConfig(
+        n_jobs=n_jobs, ilc_noise_file=ilc_noise_file, noise_seed=noise_seed, params=params
+    )
     if statistics is not None:
         evaluation.statistics = list(statistics)
 

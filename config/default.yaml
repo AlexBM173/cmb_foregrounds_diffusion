@@ -118,6 +118,9 @@ sampling:
 # -----------------------------------------------------------------------------
 evaluation:
   n_jobs: 8             # CPU workers for parallelised statistics
+  # ILC residual noise spectra used by the moments' noise_tiers (paper §4.6).
+  ilc_noise_file: data/ilc/ilc_weights_residuals_agora_fg_model.npy
+  noise_seed: 42        # seeds the per-(tier, source) noise realisations
   statistics:
     - power_spectrum
     - cross_spectrum
@@ -126,7 +129,8 @@ evaluation:
     - minkowski_functionals
     - pixel_histograms
     - tsz_stacking
-    # extensions (Gate D): peak_counts, minima_counts, scattering_transforms
+    # extensions (Gate D): peak_counts, minima_counts, scattering_transforms,
+    # minkowski_tensors
 
   power_spectrum:        # notebook 06
     lmin: 300
@@ -143,11 +147,15 @@ evaluation:
     lmin: 300
     lmax: 6060           # 8 uniform bands of width Δℓ = 720
     n_maps: 200
+    # "none" = noiseless; other entries must be keys of the ILC file's
+    # total_ilc_residuals dict (spt3g, s4_wide, s4_deep, ...)
+    noise_tiers: [none, spt3g, s4_wide, s4_deep]
   cross_moments:         # notebook 07 appendix — 12 CIB×tSZ combinations
     n_bands: 8
     lmin: 300
     lmax: 6060
     n_maps: 200
+    noise_tiers: [none, spt3g, s4_wide, s4_deep]
   minkowski_functionals: # notebook 08
     n_thresholds: 50
     threshold_min: 0.0   # thresholds span the min-max normalised map range
@@ -155,9 +163,12 @@ evaluation:
     n_maps: 200
   pixel_histograms:      # notebook 08
     n_bins: 1000
-    cib_range: [0.0, 1.0]
-    tsz_range: [-5.0, 5.0]
-    smooth_sigma: 1.0    # Gaussian smoothing of the histogram (bins)
+    # Histograms are computed in z-score units (all sources share the same
+    # norm_params transform). CIB is positively skewed; tSZ has a negative
+    # (decrement) tail at 150 GHz.
+    cib_range: [-3.0, 12.0]
+    tsz_range: [-12.0, 3.0]
+    smooth_sigma: 1.0    # Gaussian smoothing at PLOT time only (bins)
     n_maps: 200
   peak_counts:           # notebook 10 (extension)
     smoothing_fwhm_arcmin: [1.0, 2.5, 5.0]
@@ -175,6 +186,12 @@ evaluation:
     J: 5                 # number of dyadic scales
     L: 4                 # number of orientations
     n_maps: 100
+  minkowski_tensors:     # notebook 12 (extension)
+    n_thresholds: 50
+    threshold_min: 0.0
+    threshold_max: 1.0
+    tensor_types: [W012] # W012 | W200 | W201 (see morphology.py)
+    n_maps: 120
   tsz_stacking:          # notebook 09
     snr_bins: [[5, 10], [10, 20], [20, null]]   # null = no upper bound
     cutout_pix: 40       # 40 px ≈ 56′ at 1.40625′/px

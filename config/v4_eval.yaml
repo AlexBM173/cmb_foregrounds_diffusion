@@ -1,0 +1,105 @@
+# =============================================================================
+# v4_zscore_2mJy_a100 — evaluation / precompute configuration
+# =============================================================================
+# Drives the test-set statistics precompute (all statistics, ILC noise tiers
+# where relevant) and, once Colab training finishes, Monday's sampling:
+#
+#     python run.py evaluate --config config/v4_eval.yaml
+#     python run.py sample   --config config/v4_eval.yaml   # needs checkpoint
+#
+# Statistics are cached in runs/v4_zscore_2mJy_a100/stats/ — rerunning the
+# evaluate stage only regenerates figures unless parameters change.
+# =============================================================================
+
+run_name: v4_zscore_2mJy_a100
+
+data:
+  # Patches produced by scripts/vm_preprocessing/nb03_run.py (GCS
+  # preprocessing_v1_20260704), downloaded locally.
+  patches_dir: docs/tutorials/data/low_pass/2mJy
+  train_size: 0.8
+  val_size: 0.1
+  test_size: 0.1
+  seed: 42
+
+sampling:
+  num_samples: 640
+  batch_size: 16
+  ddim_steps: 250
+
+evaluation:
+  n_jobs: 8
+  ilc_noise_file: data/ilc/ilc_weights_residuals_agora_fg_model.npy
+  noise_seed: 42
+  statistics:
+    - power_spectrum
+    - cross_spectrum
+    - moments
+    - cross_moments
+    - minkowski_functionals
+    - pixel_histograms
+    - tsz_stacking
+    - peak_counts
+    - minima_counts
+    - scattering_transforms
+    - minkowski_tensors
+
+  power_spectrum:
+    lmin: 300
+    lmax: 4000
+    binsize: 60
+    n_maps: 500          # capped at the 71-patch test set for agora/gaussian
+  cross_spectrum:
+    lmin: 300
+    lmax: 4000
+    binsize: 60
+    n_maps: 500
+  moments:
+    n_bands: 8
+    lmin: 300
+    lmax: 6060
+    n_maps: 200
+    noise_tiers: [none, spt3g, s4_wide, s4_deep]
+  cross_moments:
+    n_bands: 8
+    lmin: 300
+    lmax: 6060
+    n_maps: 200
+    noise_tiers: [none, spt3g, s4_wide, s4_deep]
+  minkowski_functionals:
+    n_thresholds: 50
+    threshold_min: 0.0
+    threshold_max: 1.0
+    n_maps: 200
+  pixel_histograms:
+    n_bins: 1000
+    cib_range: [-3.0, 12.0]   # z-score units; CIB positively skewed
+    tsz_range: [-12.0, 3.0]   # z-score units; tSZ decrement tail
+    smooth_sigma: 1.0
+    n_maps: 200
+  tsz_stacking:
+    snr_bins: [[5, 10], [10, 20], [20, null]]
+    cutout_pix: 40
+    n_maps: 200
+  peak_counts:
+    smoothing_fwhm_arcmin: [1.0, 2.5, 5.0]
+    threshold_min: -1.0
+    threshold_max: 5.0
+    n_thresholds: 30
+    n_maps: 120
+  minima_counts:
+    smoothing_fwhm_arcmin: [1.0, 2.5, 5.0]
+    threshold_min: -5.0
+    threshold_max: 1.0
+    n_thresholds: 30
+    n_maps: 120
+  scattering_transforms:
+    J: 5
+    L: 4
+    n_maps: 100
+  minkowski_tensors:
+    n_thresholds: 50
+    threshold_min: 0.0
+    threshold_max: 1.0
+    tensor_types: [W012]
+    n_maps: 120

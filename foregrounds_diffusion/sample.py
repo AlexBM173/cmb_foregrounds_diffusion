@@ -27,6 +27,34 @@ DEFAULT_BATCHES = 5
 DEFAULT_BATCH_SIZE = 16
 
 
+class UnclampedGaussianDiffusion(GaussianDiffusion):
+    """``GaussianDiffusion`` without the [-1, 1] clamp on the predicted x₀.
+
+    The library hard-codes ``clip_denoised=True`` in the ancestral sampler
+    (``p_sample`` → ``p_mean_variance``) and ``clip_x_start=True`` in the
+    DDIM sampler (``ddim_sample`` → ``model_predictions``), with no kwarg
+    exposed to disable either. That clamp is correct for the library's
+    assumed data range of [-1, 1], but this project trains on z-scored maps
+    (``auto_normalize=False``) whose valid range extends far beyond ±1 —
+    tSZ decrements reach ≈ −23σ — so clamping silently flattens every
+    sampled map into ≈[-1, 1] and corrupts all tail statistics.
+
+    Both overrides force the clamp off; weights, schedule, and every other
+    code path are untouched. (``rederive_pred_noise`` is also forced off:
+    with no clamp applied, re-deriving the noise from x₀ is an identity.)
+    """
+
+    def model_predictions(
+        self, x, t, x_self_cond=None, clip_x_start=False, rederive_pred_noise=False
+    ):
+        return super().model_predictions(
+            x, t, x_self_cond=x_self_cond, clip_x_start=False, rederive_pred_noise=False
+        )
+
+    def p_mean_variance(self, x, t, x_self_cond=None, clip_denoised=True):
+        return super().p_mean_variance(x, t, x_self_cond=x_self_cond, clip_denoised=False)
+
+
 def build_model(
     channels: int = 2,
     sampling_timesteps: int | None = None,
@@ -51,7 +79,9 @@ def build_model(
     Returns
     -------
     GaussianDiffusion
-        Un-trained diffusion model ready for weight loading.
+        Un-trained diffusion model ready for weight loading. Always an
+        ``UnclampedGaussianDiffusion`` so the predicted x₀ is never clamped
+        to [-1, 1] during sampling (required for z-score trained models).
     """
     unet = Unet(
         dim=64,
@@ -62,7 +92,7 @@ def build_model(
     kwargs = {"image_size": 256, "timesteps": 1000, "auto_normalize": auto_normalize}
     if sampling_timesteps is not None:
         kwargs["sampling_timesteps"] = sampling_timesteps
-    return GaussianDiffusion(unet, **kwargs)
+    return UnclampedGaussianDiffusion(unet, **kwargs)
 
 
 def load_checkpoint(

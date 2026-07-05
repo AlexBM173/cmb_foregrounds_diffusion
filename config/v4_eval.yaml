@@ -25,7 +25,10 @@ data:
 sampling:
   num_samples: 640
   batch_size: 16
-  ddim_steps: 250
+  # Full 1000-step ancestral DDPM — matches Prabhu et al.'s verified sampler
+  # (docs/paper_code_inconsistencies.md #8) and is the conservative choice for
+  # tail statistics. Set to e.g. 250 for the optional DDIM speed-up appendix.
+  ddim_steps: null
 
 evaluation:
   n_jobs: 8

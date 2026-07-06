@@ -347,11 +347,30 @@ class CrossSpectrum(Statistic):
 
 
 class Moments(Statistic):
-    """S2/S3/S4 of the summed CIB+tSZ(+noise) field per ℓ-band."""
+    """S2/S3/S4 of the summed CIB+tSZ(+noise) field per ℓ-band.
+
+    Noise convention (report §Summary statistics): mean curves always come
+    from the noiseless maps, so no noise debiasing is required; the noisy
+    tier is computed only to provide the error bars — its patch-to-patch
+    scatter is the statistical precision a future experiment would achieve.
+    """
 
     name = "moments"
     moment_fn = staticmethod(compute_summed_moments)
     prefix = "summed"
+
+    def _variance_tier(self):
+        """Tier whose scatter supplies the error bars ('none' if no noisy tier)."""
+        noisy = [t for t in self.params.get("noise_tiers", ["none"]) if t != "none"]
+        return noisy[-1] if noisy else "none"
+
+    def _mean_and_err(self, r, m_i):
+        """(mean over maps, std over maps) — noiseless mean, variance-tier std."""
+        tiers = self.params.get("noise_tiers", ["none"])
+        mean_tier = "none" if "none" in tiers else tiers[0]
+        mean = r[f"{self.prefix}_{mean_tier}"][:, :, m_i].mean(axis=0)
+        err = r[f"{self.prefix}_{self._variance_tier()}"][:, :, m_i].std(axis=0)
+        return mean, err
 
     def _bands(self):
         p = self.params
@@ -384,32 +403,28 @@ class Moments(Statistic):
 
     def plot(self, results, plot_path):
         labels = self._labels()
-        tiers = self.params.get("noise_tiers", ["none"])
-        plt, fig, axes = _subplots(len(labels), nrows=len(tiers))
-        for t_i, tier in enumerate(tiers):
-            for m_i, label in enumerate(labels):
-                ax = axes[t_i * len(labels) + m_i]
-                for src, r in self._ordered(results):
-                    key = f"{self.prefix}_{tier}"
-                    if key not in r:
-                        continue
-                    arr = r[key][:, :, m_i]  # (N, B)
-                    ax.errorbar(
-                        r["band_centers"],
-                        arr.mean(axis=0),
-                        yerr=arr.std(axis=0),
-                        color=SOURCE_COLORS[src],
-                        label=src,
-                        marker=".",
-                        ls="-",
-                        capsize=2,
-                    )
-                if m_i == 0:
-                    ax.set_yscale("log")
-                ax.set_xlabel(r"$\ell$ band centre")
-                ax.set_title(f"{label} ({tier})")
-                if t_i == 0 and m_i == 0:
-                    ax.legend()
+        vtier = self._variance_tier()
+        plt, fig, axes = _subplots(len(labels))
+        for m_i, label in enumerate(labels):
+            ax = axes[m_i]
+            for src, r in self._ordered(results):
+                mean, err = self._mean_and_err(r, m_i)
+                ax.errorbar(
+                    r["band_centers"],
+                    mean,
+                    yerr=err,
+                    color=SOURCE_COLORS[src],
+                    label=src,
+                    marker=".",
+                    ls="-",
+                    capsize=2,
+                )
+            if m_i == 0:
+                ax.set_yscale("log")
+            ax.set_xlabel(r"$\ell$ band centre")
+            ax.set_title(f"{label} (err: {vtier})")
+            if m_i == 0:
+                ax.legend()
         fig.tight_layout()
         fig.savefig(plot_path, dpi=150)
         plt.close(fig)
@@ -459,30 +474,24 @@ class CrossMoments(Moments):
         return result
 
     def plot(self, results, plot_path):
-        tiers = self.params.get("noise_tiers", ["none"])
-        # 12 panels per tier is unwieldy — plot the first tier with noise if
-        # present, else the noiseless tier; the full grid is for notebook 14.
-        tier = next((t for t in tiers if t != "none"), tiers[0])
+        vtier = self._variance_tier()
         labels = self._labels()
         plt, fig, axes = _subplots(4, nrows=3)
         for m_i, label in enumerate(labels):
             ax = axes[m_i]
             for src, r in self._ordered(results):
-                key = f"{self.prefix}_{tier}"
-                if key not in r:
-                    continue
-                arr = r[key][:, :, m_i]
+                mean, err = self._mean_and_err(r, m_i)
                 ax.errorbar(
                     r["band_centers"],
-                    arr.mean(axis=0),
-                    yerr=arr.std(axis=0),
+                    mean,
+                    yerr=err,
                     color=SOURCE_COLORS[src],
                     label=src,
                     marker=".",
                     ls="-",
                     capsize=2,
                 )
-            ax.set_title(f"{label} ({tier})")
+            ax.set_title(f"{label} (err: {vtier})")
             if m_i >= 8:
                 ax.set_xlabel(r"$\ell$ band centre")
             if m_i == 0:
@@ -498,21 +507,22 @@ class CrossMoments(Moments):
 
 
 class PixelHistograms(Statistic):
-    """Pixel-intensity histograms in z-score units (common scale across sources).
+    """Pixel-intensity histograms in physical μK (report §Summary statistics).
 
-    The raw (unsmoothed) density histogram is cached; Gaussian smoothing is
-    applied at plot time since it is presentation, not measurement.
+    Bin ranges come straight from the report text: [0, 100] μK for CIB and
+    [−100, 0] μK for tSZ, 1,000 bins.  The raw (unsmoothed) density histogram
+    is cached; Gaussian smoothing is applied at plot time since it is
+    presentation, not measurement.
     """
 
     name = "pixel_histograms"
 
     def compute(self, cib, tsz, source):
         p = self.params
-        cib_mean, cib_std, tsz_mean, tsz_std = self.norm_params
         bins_cib = np.linspace(*p["cib_range"], p["n_bins"] + 1)
         bins_tsz = np.linspace(*p["tsz_range"], p["n_bins"] + 1)
-        h_cib, _ = np.histogram((cib - cib_mean) / cib_std, bins=bins_cib, density=True)
-        h_tsz, _ = np.histogram((tsz - tsz_mean) / tsz_std, bins=bins_tsz, density=True)
+        h_cib, _ = np.histogram(cib, bins=bins_cib, density=True)
+        h_tsz, _ = np.histogram(tsz, bins=bins_tsz, density=True)
         return {
             "bins_cib": 0.5 * (bins_cib[:-1] + bins_cib[1:]),
             "bins_tsz": 0.5 * (bins_tsz[:-1] + bins_tsz[1:]),
@@ -534,7 +544,7 @@ class PixelHistograms(Statistic):
                     label=src,
                 )
             ax.set_yscale("log")
-            ax.set_xlabel(f"{title} pixel value (z-score units)")
+            ax.set_xlabel(rf"{title} pixel value [$\mu$K]")
             ax.set_ylabel("PDF")
             ax.legend()
         fig.tight_layout()
@@ -609,12 +619,26 @@ class MinkowskiTensors(Statistic):
                 result[f"theta_{key}_{ttype}"] = td["theta"]
         return result
 
+    # representative thresholds for the orientation distributions
+    # (report §Summary statistics: ν = 0.2, 0.5, 0.8)
+    THETA_NUS = (0.2, 0.5, 0.8)
+    # tensor whose orientation/residuals the report singles out
+    PRIMARY_TENSOR = "W012"
+
     def plot(self, results, plot_path):
         tensor_types = list(self.params.get("tensor_types", ["W012"]))
-        plt, fig, axes = _subplots(len(tensor_types), nrows=2)
+        primary = self.PRIMARY_TENSOR if self.PRIMARY_TENSOR in tensor_types else tensor_types[0]
+        ncols = max(len(tensor_types), len(self.THETA_NUS))
+        plt, fig, axes = _subplots(ncols, nrows=5, height=3.2)
+        axes = axes.reshape(5, ncols)
+        for ax in axes.ravel():
+            ax.axis("off")
+
+        # rows 0-1: β̄(ν) per tensor type
         for row, key in enumerate(["cib", "tsz"]):
             for col, ttype in enumerate(tensor_types):
-                ax = axes[row * len(tensor_types) + col]
+                ax = axes[row, col]
+                ax.axis("on")
                 for src, r in self._ordered(results):
                     arr = r[f"beta_{key}_{ttype}"]
                     ax.plot(r["thresholds"], arr.mean(axis=0), color=SOURCE_COLORS[src], label=src)
@@ -628,13 +652,74 @@ class MinkowskiTensors(Statistic):
                     )
                 ax.set_ylim(0, 1)
                 ax.set_title(f"β — {key.upper()} ({ttype})")
-                if row == 1:
-                    ax.set_xlabel(r"threshold $\nu$")
                 if row == 0 and col == 0:
                     ax.legend()
+
+        # rows 2-3: orientation θ distributions for the primary tensor at the
+        # representative thresholds (report: ν = 0.2, 0.5, 0.8)
+        theta_bins = np.linspace(-np.pi / 2, np.pi / 2, 25)
+        centers = 0.5 * (theta_bins[:-1] + theta_bins[1:])
+        for row, key in enumerate(["cib", "tsz"]):
+            for col, nu in enumerate(self.THETA_NUS):
+                ax = axes[2 + row, col]
+                ax.axis("on")
+                for src, r in self._ordered(results):
+                    t_i = int(np.argmin(np.abs(r["thresholds"] - nu)))
+                    hist, _ = np.histogram(
+                        r[f"theta_{key}_{primary}"][:, t_i], bins=theta_bins, density=True
+                    )
+                    ax.step(centers, hist, where="mid", color=SOURCE_COLORS[src], label=src)
+                # isotropic reference: uniform on (−π/2, π/2]
+                ax.axhline(1 / np.pi, color="grey", lw=0.8, ls=":")
+                ax.set_title(rf"θ — {key.upper()} ({primary}, ν={nu:g})")
+                if row == 1:
+                    ax.set_xlabel(r"major-axis orientation θ [rad]")
+
+        # row 4: pointwise residual curves r(ν) = (β̄_Agora − β̄_x)/σ_Agora
+        for col, ttype in enumerate(tensor_types):
+            ax = axes[4, col]
+            ax.axis("on")
+            if "agora" in results:
+                a_r = results["agora"]
+                for src in ["ddpm", "gaussian"]:
+                    if src not in results:
+                        continue
+                    for key, ls in [("cib", "-"), ("tsz", "--")]:
+                        a = a_r[f"beta_{key}_{ttype}"]
+                        d = results[src][f"beta_{key}_{ttype}"]
+                        r_nu = (a.mean(axis=0) - d.mean(axis=0)) / (a.std(axis=0) + 1e-30)
+                        ax.plot(
+                            a_r["thresholds"],
+                            r_nu,
+                            color=SOURCE_COLORS[src],
+                            ls=ls,
+                            label=f"{src} {key.upper()}",
+                        )
+            ax.axhline(0, color="k", lw=0.8)
+            ax.set_title(f"r(ν) — {ttype}")
+            ax.set_xlabel(r"threshold $\nu$")
+            ax.set_ylabel(r"$(\bar\beta_{\rm Agora} - \bar\beta)/\sigma_{\rm Agora}$")
+            if col == 0:
+                ax.legend(fontsize=7)
         fig.tight_layout()
         fig.savefig(plot_path, dpi=150)
         plt.close(fig)
+
+    def summarise(self, results):
+        # report eq: r(ν) = (β̄_Agora − β̄_DDPM) / σ_Agora, quoted at max |r|
+        lines = []
+        if "agora" in results and "ddpm" in results:
+            for ttype in self.params.get("tensor_types", ["W012"]):
+                for key in ["cib", "tsz"]:
+                    a = results["agora"][f"beta_{key}_{ttype}"]
+                    d = results["ddpm"][f"beta_{key}_{ttype}"]
+                    resid = np.abs(a.mean(axis=0) - d.mean(axis=0)) / (a.std(axis=0) + 1e-30)
+                    nu_max = results["agora"]["thresholds"][resid.argmax()]
+                    lines.append(
+                        f"minkowski_tensors[{key},{ttype}]: max |Agora-DDPM| β residual "
+                        f"{resid.max():.2f}σ (at ν={nu_max:.2f})"
+                    )
+        return lines
 
 
 # ---------------------------------------------------------------------------
@@ -648,6 +733,14 @@ class TszStacking(Statistic):
     tSZ at 150 GHz is a decrement (clusters are negative); peaks are selected
     and stacked on the sign-flipped map so the stacked amplitude is positive.
     The ``sign`` entry in the cache records the flip.
+
+    Report convention: T̄ and σ_T are the mean and standard deviation of the
+    *simulated* (Agora) tSZ maps, applied identically to every source so the
+    SNR bins correspond to the same physical depths.  ``run_evaluate`` injects
+    them as ``snr_ref_mean``/``snr_ref_std`` params (which also keys the cache
+    to the reference values); without them each source falls back to its own
+    global mean and per-map std — not comparable across sources with different
+    variance.
     """
 
     name = "tsz_stacking"
@@ -663,14 +756,16 @@ class TszStacking(Statistic):
         # Detect the decrement convention from the data: a dominant negative
         # tail means clusters are minima and the map must be sign-flipped.
         sign = -1.0 if np.abs(tsz.min()) > np.abs(tsz.max()) else 1.0
-        maps = sign * (tsz - tsz.mean())
+        ref_mean = p.get("snr_ref_mean", tsz.mean())
+        ref_std = p.get("snr_ref_std")  # None → per-map std inside the selector
+        maps = sign * (tsz - ref_mean)
         result = {"sign": np.array(sign), "cutout_pix": np.array(cutout)}
         half = cutout // 2
         idx = np.indices((cutout, cutout)).astype(float)
         xy = ((idx[0] - half) * dx_arcmin / 60.0, (idx[1] - half) * dx_arcmin / 60.0)
         for smin, smax in p["snr_bins"]:
             label = self._bin_label(smin, smax)
-            coords = select_snr_pixels(maps, smin, smax)
+            coords = select_snr_pixels(maps, smin, smax, noise=ref_std)
             cuts = extract_cutouts(maps, coords, cutout, max_cutouts=len(coords) or 1)
             if cuts is None:
                 result[f"n_{label}"] = np.array(0)
@@ -732,13 +827,14 @@ class PeakCounts(Statistic):
 
     def compute(self, cib, tsz, source):
         p = self.params
-        thresholds = np.linspace(p["threshold_min"], p["threshold_max"], p["n_thresholds"])
+        # n_thresholds values are histogram bin EDGES (report: linspace(-1, 5, 30))
+        edges = np.linspace(p["threshold_min"], p["threshold_max"], p["n_thresholds"])
         dx_arcmin = self.mapparams[2]
-        result = {"thresholds": thresholds}
+        result = {"thresholds": edges, "bin_centers": 0.5 * (edges[:-1] + edges[1:])}
         for key, maps in [("cib", cib), ("tsz", tsz)]:
             for fwhm in p["smoothing_fwhm_arcmin"]:
                 result[f"{key}_fwhm{fwhm:g}"] = self.count_fn(
-                    maps, thresholds, fwhm, pixel_res_arcmin=dx_arcmin
+                    maps, edges, fwhm, pixel_res_arcmin=dx_arcmin
                 )
         return result
 
@@ -751,7 +847,7 @@ class PeakCounts(Statistic):
                 for src, r in self._ordered(results):
                     arr = r[f"{key}_fwhm{fwhm:g}"]
                     ax.errorbar(
-                        r["thresholds"],
+                        r["bin_centers"],
                         arr.mean(axis=0),
                         yerr=arr.std(axis=0),
                         color=SOURCE_COLORS[src],
@@ -781,27 +877,87 @@ class MinimaCounts(PeakCounts):
 
 
 class ScatteringTransforms(Statistic):
+    """S1/S2 scattering coefficients, plus (``covariance: true``) the
+    scattering covariance (C01, C11) and the two-field CIB×tSZ cross
+    covariance — the four WST tests of report §Summary statistics.
+
+    Covariance vectors are the Cheng et al. ``for_synthesis_iso`` summaries
+    (631 single-field / 2262 two-field coefficients at J=5, L=4); complex
+    entries are cached as-is and compared via their real part.
+    """
+
     name = "scattering_transforms"
 
     def compute(self, cib, tsz, source):
         from foregrounds_diffusion.scattering_stats import (
             compute_scattering_coefficients,
+            compute_scattering_covariance,
+            compute_scattering_covariance_2fields,
             scattering_summary,
         )
 
         p = self.params
+        # default to CPU: batch FFTs over the full map stack overflow small
+        # laptop GPUs, and the Cheng backend is fast on CPU (~0.1 s/map)
+        device = p.get("device", "cpu")
+        # covariance intermediates are (batch, J, L, H, W) complex — chunk the
+        # stack to bound RAM (exact: normalisation is per image)
+        cov_batch = p.get("cov_batch", 8)
         result = {}
-        for key, maps in [("cib", cib), ("tsz", tsz)]:
-            coeffs = compute_scattering_coefficients(
-                np.ascontiguousarray(maps, dtype=np.float32), J=p["J"], L=p["L"]
-            )
+        cib32 = np.ascontiguousarray(cib, dtype=np.float32)
+        tsz32 = np.ascontiguousarray(tsz, dtype=np.float32)
+        for key, maps in [("cib", cib32), ("tsz", tsz32)]:
+            coeffs = compute_scattering_coefficients(maps, J=p["J"], L=p["L"], device=device)
             result[f"S1_{key}"] = coeffs["S1"]
             result[f"S2_{key}"] = coeffs["S2"]
             result[f"summary_{key}"] = scattering_summary(coeffs)
+        if p.get("covariance", False):
+            for key, maps in [("cib", cib32), ("tsz", tsz32)]:
+                cov = compute_scattering_covariance(
+                    maps, J=p["J"], L=p["L"], device=device, batch_size=cov_batch
+                )
+                if cov is None:
+                    break  # Cheng backend unavailable — S1/S2 already cached
+                result[f"C01_iso_{key}"] = cov["C01_iso"]
+                result[f"C11_iso_{key}"] = cov["C11_iso"]
+                result[f"synth_iso_{key}"] = cov["for_synthesis_iso"]
+            cross = compute_scattering_covariance_2fields(
+                cib32, tsz32, J=p["J"], L=p["L"], device=device, batch_size=cov_batch
+            )
+            if cross is not None:
+                result["C01_iso_cross"] = cross["C01_iso"]
+                result["C11_iso_cross"] = cross["C11_iso"]
+                result["synth_iso_cross"] = cross["for_synthesis_iso"]
         return result
 
+    def summarise(self, results):
+        lines = []
+        if "agora" in results and "ddpm" in results:
+            for key in ["cib", "tsz", "cross"]:
+                k = f"synth_iso_{key}"
+                if k not in results["agora"] or k not in results["ddpm"]:
+                    continue
+                a = np.real(results["agora"][k])
+                d = np.real(results["ddpm"][k])
+                resid = np.abs(a.mean(axis=0) - d.mean(axis=0)) / (a.std(axis=0) + 1e-30)
+                lines.append(
+                    f"scattering_cov[{key}]: max |Agora-DDPM| residual "
+                    f"{resid.max():.2f}σ (mean {resid.mean():.2f}σ, "
+                    f"{a.shape[1]} iso coefficients)"
+                )
+        return lines
+
     def plot(self, results, plot_path):
-        plt, fig, axes = _subplots(2, nrows=2, height=3.4)
+        have_ad = "agora" in results and "ddpm" in results
+        cov_keys = [
+            k
+            for k in ["cib", "tsz", "cross"]
+            if have_ad
+            and f"synth_iso_{k}" in results["agora"]
+            and f"synth_iso_{k}" in results["ddpm"]
+        ]
+        nrows = 2 + (2 if cov_keys else 0)
+        plt, fig, axes = _subplots(2, nrows=nrows, height=3.4)
         for col, key in enumerate(["cib", "tsz"]):
             ax = axes[col]
             for src, r in self._ordered(results):
@@ -822,7 +978,7 @@ class ScatteringTransforms(Statistic):
             if col == 0:
                 ax.legend()
             ax = axes[2 + col]
-            if "agora" in results and "ddpm" in results:
+            if have_ad:
                 a = results["agora"][f"summary_{key}"]
                 d = results["ddpm"][f"summary_{key}"]
                 resid = (a.mean(axis=0) - d.mean(axis=0)) / (a.std(axis=0) + 1e-30)
@@ -830,6 +986,19 @@ class ScatteringTransforms(Statistic):
                 ax.axhline(0, color="k", lw=0.8)
             ax.set_xlabel("feature index (S1 ⊕ S2)")
             ax.set_ylabel(r"(Agora − DDPM)/$\sigma$")
+        # scattering covariance residuals (report WST tests 3 and 4)
+        for i, key in enumerate(cov_keys):
+            ax = axes[4 + i]
+            a = np.real(results["agora"][f"synth_iso_{key}"])
+            d = np.real(results["ddpm"][f"synth_iso_{key}"])
+            resid = (a.mean(axis=0) - d.mean(axis=0)) / (a.std(axis=0) + 1e-30)
+            ax.plot(resid, lw=0.7, color="steelblue")
+            ax.axhline(0, color="k", lw=0.8)
+            ax.set_xlabel("iso coefficient index (log P00 ⊕ log S1 ⊕ C01 ⊕ C11)")
+            ax.set_ylabel(r"(Agora − DDPM)/$\sigma$")
+            ax.set_title(f"scattering covariance — {key}  ({resid.size} coefficients)")
+        for j in range(4 + len(cov_keys), len(axes)):
+            axes[j].axis("off")
         fig.tight_layout()
         fig.savefig(plot_path, dpi=150)
         plt.close(fig)
@@ -881,6 +1050,15 @@ def main(cfg, run, dry_run=False):
         val_size=cfg.data.val_size,
         test_size=cfg.data.test_size,
     )
+
+    # Report convention: tSZ-stacking SNR bins are defined by the mean and
+    # std of the *simulated* (Agora) maps, applied identically to every
+    # source. Injected as params so the cache meta keys on the reference.
+    if "tsz_stacking" in stat_names and "agora" in sources:
+        ref_tsz = sources["agora"][1]
+        stack_params = cfg.evaluation.params.setdefault("tsz_stacking", {})
+        stack_params["snr_ref_mean"] = round(float(ref_tsz.mean()), 6)
+        stack_params["snr_ref_std"] = round(float(ref_tsz.std()), 6)
 
     needs_noise = any(
         any(t != "none" for t in cfg.evaluation.params.get(n, {}).get("noise_tiers", []))

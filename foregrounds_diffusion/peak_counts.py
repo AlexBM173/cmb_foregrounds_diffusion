@@ -116,23 +116,25 @@ def _peak_minima_one_map(
     pixel_res_arcmin,
     filter_size,
 ):
-    """Compute peak and minima counts for a single map across all smoothing scales."""
+    """Compute peak and minima histograms for a single map across all smoothing scales."""
+    peak_edges = np.asarray(thresholds_peaks, dtype=float)
+    minima_edges = np.asarray(thresholds_minima, dtype=float)
     result = {}
     for fwhm in smoothing_scales_arcmin:
         smoothed = smooth_map(patch, fwhm, pixel_res_arcmin)
         sigma = smoothed.std()
         if sigma == 0:
             result[fwhm] = {
-                "peaks": np.zeros(len(thresholds_peaks)),
-                "minima": np.zeros(len(thresholds_minima)),
+                "peaks": np.zeros(len(peak_edges) - 1),
+                "minima": np.zeros(len(minima_edges) - 1),
             }
             continue
         nu_map = smoothed / sigma
         peak_vals = find_peaks(nu_map, filter_size=filter_size)
         minima_vals = find_minima(nu_map, filter_size=filter_size)
         result[fwhm] = {
-            "peaks": np.array([(peak_vals > t).sum() for t in thresholds_peaks], dtype=float),
-            "minima": np.array([(minima_vals < t).sum() for t in thresholds_minima], dtype=float),
+            "peaks": np.histogram(peak_vals, bins=peak_edges)[0].astype(float),
+            "minima": np.histogram(minima_vals, bins=minima_edges)[0].astype(float),
         }
     return result
 
@@ -140,18 +142,19 @@ def _peak_minima_one_map(
 def count_peaks_binned(
     patches_nhw, thresholds, fwhm_arcmin, pixel_res_arcmin=1.40625, filter_size=3
 ):
-    """Compute mean peak counts per map as a function of threshold ν.
+    """Compute differential peak-count histograms per map.
 
-    Following Sabyr et al. (2024), thresholds are defined in units of the
-    per-map standard deviation: ν = T / σ.  Peaks with ν > threshold are
-    counted, giving a cumulative count curve.
+    Following Sabyr et al. (2024), peak heights are expressed in units of
+    the (smoothed) per-map standard deviation, ν = T / σ, and binned into
+    a histogram whose bin edges are ``thresholds``.
 
     Parameters
     ----------
     patches_nhw : ndarray, shape (N, H, W)
         Stack of flat-sky patches.
     thresholds : array_like
-        Threshold values in units of σ (e.g. ``np.linspace(-4, 4, 40)``).
+        Histogram bin edges in units of σ (e.g. ``np.linspace(-1, 5, 30)``
+        → 29 bins).
     fwhm_arcmin : float
         Gaussian smoothing scale in arcmin applied before peak finding.
     pixel_res_arcmin : float
@@ -161,11 +164,12 @@ def count_peaks_binned(
 
     Returns
     -------
-    counts : ndarray, shape (N, len(thresholds))
-        Peak counts per map per threshold bin.
+    counts : ndarray, shape (N, len(thresholds) - 1)
+        Peak counts per map per histogram bin.
     """
+    edges = np.asarray(thresholds, dtype=float)
     N = len(patches_nhw)
-    counts = np.zeros((N, len(thresholds)))
+    counts = np.zeros((N, len(edges) - 1))
 
     for i, patch in enumerate(patches_nhw):
         smoothed = smooth_map(patch, fwhm_arcmin, pixel_res_arcmin)
@@ -174,8 +178,7 @@ def count_peaks_binned(
             continue
         nu_map = smoothed / sigma
         peak_vals = find_peaks(nu_map, filter_size=filter_size)
-        for t, thresh in enumerate(thresholds):
-            counts[i, t] = (peak_vals > thresh).sum()
+        counts[i], _ = np.histogram(peak_vals, bins=edges)
 
     return counts
 
@@ -183,16 +186,19 @@ def count_peaks_binned(
 def count_minima_binned(
     patches_nhw, thresholds, fwhm_arcmin, pixel_res_arcmin=1.40625, filter_size=3
 ):
-    """Compute mean minima counts per map as a function of threshold ν.
+    """Compute differential minima-count histograms per map.
 
-    Minima with ν < threshold are counted (threshold should be negative).
+    Minima depths are expressed in units of the (smoothed) per-map standard
+    deviation, ν = T / σ, and binned into a histogram whose bin edges are
+    ``thresholds``.
 
     Parameters
     ----------
     patches_nhw : ndarray, shape (N, H, W)
         Stack of flat-sky patches.
     thresholds : array_like
-        Threshold values in units of σ (e.g. ``np.linspace(-4, 0, 20)``).
+        Histogram bin edges in units of σ (e.g. ``np.linspace(-5, 1, 30)``
+        → 29 bins).
     fwhm_arcmin : float
         Gaussian smoothing scale in arcmin.
     pixel_res_arcmin : float
@@ -202,11 +208,12 @@ def count_minima_binned(
 
     Returns
     -------
-    counts : ndarray, shape (N, len(thresholds))
-        Minima counts per map per threshold bin.
+    counts : ndarray, shape (N, len(thresholds) - 1)
+        Minima counts per map per histogram bin.
     """
+    edges = np.asarray(thresholds, dtype=float)
     N = len(patches_nhw)
-    counts = np.zeros((N, len(thresholds)))
+    counts = np.zeros((N, len(edges) - 1))
 
     for i, patch in enumerate(patches_nhw):
         smoothed = smooth_map(patch, fwhm_arcmin, pixel_res_arcmin)
@@ -215,8 +222,7 @@ def count_minima_binned(
             continue
         nu_map = smoothed / sigma
         minima_vals = find_minima(nu_map, filter_size=filter_size)
-        for t, thresh in enumerate(thresholds):
-            counts[i, t] = (minima_vals < thresh).sum()
+        counts[i], _ = np.histogram(minima_vals, bins=edges)
 
     return counts
 
@@ -261,7 +267,7 @@ def compute_peak_minima_counts(
     results : dict
         Nested dictionary keyed by smoothing scale (arcmin), then
         ``'peaks'`` and ``'minima'``, each containing an ndarray of
-        shape (N, len(thresholds)).
+        shape (N, len(thresholds) - 1) — differential histogram counts.
 
     Examples
     --------

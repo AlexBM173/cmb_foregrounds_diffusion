@@ -87,6 +87,14 @@ def grf_mfs():
     single realisation deviates from the ensemble Gaussian).  A coherence
     length of ~13 px on a 256-px map satisfies both.
     """
+    # guard here, not only in the tests: the fixture itself needs quantimpy,
+    # and a fixture error is reported as ERROR rather than SKIP on CI.
+    # ValueError covers a binary-incompatible build (sdist compiled against a
+    # different numpy ABI than the runtime one) — skip rather than error.
+    try:
+        from quantimpy import minkowski  # noqa: F401
+    except (ImportError, ValueError) as exc:
+        pytest.skip(f"quantimpy unavailable: {exc}")
     from foregrounds_diffusion.morphology import compute_mfs
 
     el = np.arange(1, 10000).astype(float)
@@ -213,14 +221,14 @@ def test_count_peaks_binned_matches_direct_count():
     # Negligible smoothing (fwhm << pixel): the binned count at a very low
     # threshold must equal the direct peak count.
     counts = count_peaks_binned(
-        m[None, :, :], thresholds=[-10.0, 3.0], fwhm_arcmin=0.1, pixel_res_arcmin=1.40625
+        m[None, :, :], thresholds=[-10.0, 3.0, 100.0], fwhm_arcmin=0.1, pixel_res_arcmin=1.40625
     )
     assert counts.shape == (1, 2)
-    assert counts[0, 0] == k + 1
-    # Only the 4 sharp blobs survive a 3-sigma threshold
+    # differential histogram: bin (-10, 3] holds the one broad background
+    # peak; bin (3, 100] holds the k sharp blobs
+    assert counts[0, 0] == 1
     assert counts[0, 1] == k
-    # Cumulative counts are monotonically non-increasing in the threshold
-    assert counts[0, 1] <= counts[0, 0]
+    assert counts.sum() == k + 1
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +277,8 @@ def test_scattering_homogeneity(scattering_grf_stack):
     c1 = compute_scattering_coefficients(x, J=3, L=4, device="cpu")
     c5 = compute_scattering_coefficients(5.0 * x, J=3, L=4, device="cpu")
     assert np.allclose(c5["S1"], 5.0 * c1["S1"], rtol=1e-4)
-    assert np.allclose(c5["S2"], 5.0 * c1["S2"], rtol=1e-4)
+    # Cheng backend marks invalid (j2 <= j1) S2 entries as NaN
+    assert np.allclose(c5["S2"], 5.0 * c1["S2"], rtol=1e-4, equal_nan=True)
 
 
 @needs_backend

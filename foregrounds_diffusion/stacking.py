@@ -29,18 +29,26 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 
-def select_snr_pixels(tsz_maps_nhw, snr_min, snr_max, min_separation=5):
+def select_snr_pixels(tsz_maps_nhw, snr_min, snr_max, min_separation=5, noise=None):
     """Find local SNR-peak coordinates within a given SNR bin.
+
+    SNR bins follow the report convention ``A·σ < T ≤ B·σ`` (lower bound
+    exclusive, upper bound inclusive).
 
     Parameters
     ----------
     tsz_maps_nhw : ndarray, shape (N, H, W)
     snr_min : float
-        Lower SNR bound (inclusive).
+        Lower SNR bound (exclusive).
     snr_max : float or None
-        Upper SNR bound (exclusive).  *None* means no upper bound.
+        Upper SNR bound (inclusive).  *None* means no upper bound.
     min_separation : int
         Minimum pixel separation between selected peaks.
+    noise : float, optional
+        Fixed noise scale σ shared by all maps (report convention: the
+        standard deviation of the simulated Agora maps, so the same
+        physical threshold applies to every source).  *None* falls back
+        to each map's own standard deviation.
 
     Returns
     -------
@@ -51,17 +59,17 @@ def select_snr_pixels(tsz_maps_nhw, snr_min, snr_max, min_separation=5):
 
     coords = []
     for i, m in enumerate(tsz_maps_nhw):
-        noise = m.std()
-        if noise == 0:
+        sigma = m.std() if noise is None else noise
+        if sigma == 0:
             continue
-        snr_map = m / noise
+        snr_map = m / sigma
         local_max = maximum_filter(snr_map, size=min_separation) == snr_map
-        in_bin = (snr_map >= snr_min) & local_max
+        in_bin = (snr_map > snr_min) & local_max
         if snr_max is not None:
-            in_bin &= snr_map < snr_max
+            in_bin &= snr_map <= snr_max
         for ri, rj in np.argwhere(in_bin):
             coords.append((i, int(ri), int(rj)))
-    print(f"SNR [{snr_min}, {snr_max}): {len(coords)} peaks found")
+    print(f"SNR ({snr_min}, {snr_max}]: {len(coords)} peaks found")
     return coords
 
 

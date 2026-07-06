@@ -136,7 +136,8 @@ def test_find_minima_single_dip():
 def test_count_peaks_binned_shape(patch_stack):
     thresholds = np.linspace(-3, 3, 15)
     counts = count_peaks_binned(patch_stack, thresholds, fwhm_arcmin=5.0)
-    assert counts.shape == (len(patch_stack), len(thresholds))
+    # thresholds are histogram bin edges -> one fewer bin than edges
+    assert counts.shape == (len(patch_stack), len(thresholds) - 1)
 
 
 def test_count_peaks_binned_non_negative(patch_stack):
@@ -145,19 +146,24 @@ def test_count_peaks_binned_non_negative(patch_stack):
     assert np.all(counts >= 0)
 
 
-def test_count_peaks_binned_decreasing_with_threshold(patch_stack):
-    # Higher ν threshold → fewer peaks (cumulative from above).
+def test_count_peaks_binned_matches_direct_histogram(patch_stack):
+    # Differential histogram: bins must reproduce np.histogram of the peak
+    # heights of the smoothed, per-map-normalised map.
+    from foregrounds_diffusion.peak_counts import find_peaks, smooth_map
+
     thresholds = np.linspace(-1, 4, 20)
     counts = count_peaks_binned(patch_stack, thresholds, fwhm_arcmin=5.0)
-    mean_counts = counts.mean(axis=0)
-    assert np.all(np.diff(mean_counts) <= 0)
+    smoothed = smooth_map(patch_stack[0], 5.0, 1.40625)
+    expected, _ = np.histogram(find_peaks(smoothed / smoothed.std()), bins=thresholds)
+    assert np.array_equal(counts[0], expected)
 
 
 def test_count_peaks_binned_zero_std_map_handled():
     maps = np.zeros((3, 32, 32))
-    thresholds = np.array([0.0, 1.0])
+    thresholds = np.array([0.0, 0.5, 1.0])
     counts = count_peaks_binned(maps, thresholds, fwhm_arcmin=5.0)
     assert counts.shape == (3, 2)
+    assert np.all(counts == 0)
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +174,7 @@ def test_count_peaks_binned_zero_std_map_handled():
 def test_count_minima_binned_shape(patch_stack):
     thresholds = np.linspace(-4, 0, 10)
     counts = count_minima_binned(patch_stack, thresholds, fwhm_arcmin=5.0)
-    assert counts.shape == (len(patch_stack), len(thresholds))
+    assert counts.shape == (len(patch_stack), len(thresholds) - 1)
 
 
 def test_count_minima_binned_non_negative(patch_stack):
@@ -177,12 +183,14 @@ def test_count_minima_binned_non_negative(patch_stack):
     assert np.all(counts >= 0)
 
 
-def test_count_minima_binned_increasing_with_threshold(patch_stack):
-    # More negative ν threshold → fewer minima counted (fewer below a lower bar).
+def test_count_minima_binned_matches_direct_histogram(patch_stack):
+    from foregrounds_diffusion.peak_counts import find_minima, smooth_map
+
     thresholds = np.linspace(-4, -0.5, 15)
     counts = count_minima_binned(patch_stack, thresholds, fwhm_arcmin=5.0)
-    mean_counts = counts.mean(axis=0)
-    assert np.all(np.diff(mean_counts) >= 0)
+    smoothed = smooth_map(patch_stack[0], 5.0, 1.40625)
+    expected, _ = np.histogram(find_minima(smoothed / smoothed.std()), bins=thresholds)
+    assert np.array_equal(counts[0], expected)
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +218,8 @@ def test_compute_peak_minima_counts_shapes(patch_stack):
     results = compute_peak_minima_counts(
         patch_stack, thresholds_p, thresholds_m, smoothing_scales_arcmin=(3.0,)
     )
-    assert results[3.0]["peaks"].shape == (N, 12)
-    assert results[3.0]["minima"].shape == (N, 8)
+    assert results[3.0]["peaks"].shape == (N, 11)
+    assert results[3.0]["minima"].shape == (N, 7)
 
 
 def test_compute_peak_minima_counts_parallel_matches_serial(patch_stack):

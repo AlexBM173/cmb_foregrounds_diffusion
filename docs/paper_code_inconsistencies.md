@@ -116,8 +116,11 @@ Until (1)–(2) are confirmed, do not trust any figure's absolute amplitude.
 **Paper:** never states which sampler generated its results — no mention of DDIM, implicit models,
 reduced-step sampling, or η anywhere. §3.1 gives only the ancestral reverse kernel
 pθ(x_{t−1}|x_t) = N(µθ, βt). Appendix A claims "sampling takes roughly 1–2 seconds per patch" on an
-A100, which looks optimistic for 1000 sequential U-Net passes (calibrate against the v4 DDIM-250
-sampling run when it happens).
+A100, which looks optimistic for 1000 sequential U-Net passes. **Measured (v4 run, 5 Jul 2026,
+Colab A100-80GB, memory-efficient attention, fp16, batch 16): ~6.1 it/s → ~164 s per 1000-step
+batch → ~10 s per patch ancestral** — the paper's figure is ~5–10× optimistic for the sampler its
+authors verifiably used, and would only fit DDIM at ~100–250 steps or much larger batches. Another
+loosely-reported number, consistent with #6.
 
 **Verified from git history:** Prabhu's original `sample.py` (initial commit `a3804d5`) calls
 `diffusion.sample(batch_size=16)` on a `GaussianDiffusion` built with no `sampling_timesteps` kwarg

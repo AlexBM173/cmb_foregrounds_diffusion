@@ -165,28 +165,27 @@ def test_parameter_change_invalidates_cache(cfg, run):
         assert json.loads(str(f["__meta__"]))["binsize"] == 100
 
 
-def test_pixel_histograms_common_zscore_scale():
+def test_pixel_histograms_physical_units():
+    # report convention: histograms of the physical-unit maps directly
     params = {
         "n_bins": 40,
-        "cib_range": [-4.0, 4.0],
-        "tsz_range": [-4.0, 4.0],
+        "cib_range": [0.0, 40.0],
+        "tsz_range": [-20.0, 0.0],
         "smooth_sigma": 1.0,
         "n_maps": 8,
     }
-    norm_params = np.array([20.0, 5.0, -5.0, 3.5])
-    stat = PixelHistograms(params, 1, [RES, RES, 5.625, 5.625], norm_params=norm_params)
+    stat = PixelHistograms(params, 1, [RES, RES, 5.625, 5.625])
     rng = np.random.default_rng(3)
-    # physical maps that z-score back to standard normal
-    cib = rng.standard_normal((8, RES, RES)) * 5.0 + 20.0
-    tsz = rng.standard_normal((8, RES, RES)) * 3.5 - 5.0
+    cib = rng.standard_normal((8, RES, RES)) * 3.0 + 20.0
+    tsz = rng.standard_normal((8, RES, RES)) * 2.0 - 8.0
     r = stat.compute(cib, tsz, "agora")
-    for key in ["cib", "tsz"]:
+    for key, centre in [("cib", 20.0), ("tsz", -8.0)]:
         h, bc = r[f"hist_{key}"], r[f"bins_{key}"]
         assert np.all(h >= 0)
-        # density integrates to ~1 over the (generous) range
+        # density integrates to ~1 over a range covering the distribution
         assert np.isclose(np.trapezoid(h, bc), 1.0, atol=0.05)
-        # peak near zero in z-score units
-        assert abs(bc[np.argmax(h)]) < 0.5
+        # histogram peaks near the physical mean
+        assert abs(bc[np.argmax(h)] - centre) < 2.0
 
 
 def test_tsz_stacking_detects_decrement_sign():

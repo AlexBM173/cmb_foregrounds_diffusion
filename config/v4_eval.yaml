@@ -18,8 +18,8 @@ data:
   # preprocessing_v1_20260704), downloaded locally.
   patches_dir: docs/tutorials/data/low_pass/2mJy
   train_size: 0.8
-  val_size: 0.1
-  test_size: 0.1
+  val_size: 0.0   # paper convention: two-way 80/20 split, no separate validation set
+  test_size: 0.2
   seed: 42
 
 sampling:
@@ -62,13 +62,15 @@ evaluation:
     lmin: 300
     lmax: 6060
     n_maps: 200
-    noise_tiers: [none, spt3g, s4_wide, s4_deep]
+    # Report convention: means from the noiseless maps (no noise debiasing),
+    # error bars from the s4_deep tier's patch-to-patch scatter.
+    noise_tiers: [none, s4_deep]
   cross_moments:
     n_bands: 8
     lmin: 300
     lmax: 6060
     n_maps: 200
-    noise_tiers: [none, spt3g, s4_wide, s4_deep]
+    noise_tiers: [none, s4_deep]
   minkowski_functionals:
     n_thresholds: 50
     threshold_min: 0.0
@@ -76,13 +78,13 @@ evaluation:
     n_maps: 200
   pixel_histograms:
     n_bins: 1000
-    cib_range: [-3.0, 12.0]   # z-score units; CIB positively skewed
-    tsz_range: [-12.0, 3.0]   # z-score units; tSZ decrement tail
+    cib_range: [0.0, 100.0]     # physical muK (report §Summary statistics)
+    tsz_range: [-100.0, 0.0]    # physical muK; tSZ decrements negative
     smooth_sigma: 1.0
     n_maps: 200
   tsz_stacking:
     snr_bins: [[5, 10], [10, 20], [20, null]]
-    cutout_pix: 40
+    cutout_pix: 22              # 22 px x 1.40625' = 30.9' — report's 31'x31' cutouts
     n_maps: 200
   peak_counts:
     smoothing_fwhm_arcmin: [1.0, 2.5, 5.0]
@@ -100,9 +102,10 @@ evaluation:
     J: 5
     L: 4
     n_maps: 100
+    covariance: true            # C01/C11 + two-field cross (Cheng backend)
   minkowski_tensors:
-    n_thresholds: 50
-    threshold_min: 0.0
-    threshold_max: 1.0
-    tensor_types: [W012]
+    n_thresholds: 30            # report: 30 equally spaced thresholds in [0.05, 0.95]
+    threshold_min: 0.05
+    threshold_max: 0.95
+    tensor_types: [W012, W200, W201]
     n_maps: 120

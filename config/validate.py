@@ -59,7 +59,7 @@ KNOWN_STATISTICS = {
         "n_thresholds",
         "n_maps",
     },
-    "scattering_transforms": {"J", "L", "n_maps"},
+    "scattering_transforms": {"J", "L", "n_maps", "covariance", "device"},
     "tsz_stacking": {"snr_bins", "cutout_pix", "n_maps"},
 }
 

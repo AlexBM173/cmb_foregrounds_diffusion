@@ -32,7 +32,9 @@ The Cheng et al. implementation is preferred because it is faster
 for large batches and exposes the scattering covariance C11 directly.
 """
 
+import sys
 import warnings
+from pathlib import Path
 
 import numpy as np
 
@@ -41,8 +43,16 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 
+def _ensure_cheng_on_path():
+    """Add the vendored Cheng et al. repo (repo root) to sys.path if present."""
+    vendored = Path(__file__).resolve().parent.parent / "scattering_transform"
+    if (vendored / "scattering").is_dir() and str(vendored) not in sys.path:
+        sys.path.insert(0, str(vendored))
+
+
 def _get_backend():
     """Return ('cheng', module) or ('kymatio', module) or raise."""
+    _ensure_cheng_on_path()
     try:
         import scattering
 
@@ -170,7 +180,27 @@ def compute_scattering_coefficients(patches_nhw, J=5, L=4, device=None):
     }
 
 
-def compute_scattering_covariance(patches_nhw, J=5, L=4, device=None):
+def _to_numpy(s_cov):
+    return {k: v.cpu().numpy() if hasattr(v, "cpu") else v for k, v in s_cov.items()}
+
+
+def _concat_batches(batches, batch_sizes):
+    """Concatenate per-image arrays across batches; pass through shared entries.
+
+    Per-image outputs of ``scattering_cov`` carry the batch size as their
+    leading dimension; index tables (``index_for_synthesis*``, shape (7, -1))
+    and scalars are identical across batches and taken from the first.
+    """
+    out = {}
+    for key, v0 in batches[0].items():
+        if isinstance(v0, np.ndarray) and v0.ndim >= 1 and v0.shape[0] == batch_sizes[0]:
+            out[key] = np.concatenate([b[key] for b in batches], axis=0)
+        else:
+            out[key] = v0
+    return out
+
+
+def compute_scattering_covariance(patches_nhw, J=5, L=4, device=None, batch_size=None):
     """Compute the scattering covariance C11 (modulus × modulus correlations).
 
     Only available with the Cheng et al. backend.  The scattering covariance
@@ -187,6 +217,10 @@ def compute_scattering_covariance(patches_nhw, J=5, L=4, device=None):
         Number of orientations.
     device : str or None
         ``'cuda'``, ``'cpu'``, or ``None`` (auto-detect).
+    batch_size : int or None
+        Process the stack in chunks of this many maps to bound memory.
+        Exact — normalisation ('P00', use_ref=False) is per image, so
+        batching does not change any coefficient.  None = single pass.
 
     Returns
     -------
@@ -195,6 +229,7 @@ def compute_scattering_covariance(patches_nhw, J=5, L=4, device=None):
         with keys ``'C11_iso'``, ``'C01_iso'``, ``'S1'``, etc.
         Returns ``None`` if the Cheng et al. backend is not available.
     """
+    _ensure_cheng_on_path()
     try:
         import scattering
         import torch
@@ -214,10 +249,76 @@ def compute_scattering_covariance(patches_nhw, J=5, L=4, device=None):
 
     patches_f32 = patches_nhw.astype(np.float32)
     st_calc = scattering.Scattering2d(M=H, N=W, J=J, L=L, device=cheng_device)
-    s_cov = st_calc.scattering_cov(torch.tensor(patches_f32))
+    if batch_size is None or batch_size >= N:
+        return _to_numpy(st_calc.scattering_cov(torch.tensor(patches_f32)))
+    batches, sizes = [], []
+    for i0 in range(0, N, batch_size):
+        chunk = patches_f32[i0 : i0 + batch_size]
+        batches.append(_to_numpy(st_calc.scattering_cov(torch.tensor(chunk))))
+        sizes.append(len(chunk))
+    return _concat_batches(batches, sizes)
 
-    # Move all tensors to CPU numpy
-    return {k: v.cpu().numpy() if hasattr(v, "cpu") else v for k, v in s_cov.items()}
+
+def compute_scattering_covariance_2fields(a_nhw, b_nhw, J=5, L=4, device=None, batch_size=None):
+    """Two-field (cross) scattering covariance between fields a and b.
+
+    Only available with the Cheng et al. backend.  Captures whether the two
+    fields share coherent non-Gaussian structure at the same scales and
+    locations — invisible to auto- and cross-power spectra.
+
+    Parameters
+    ----------
+    a_nhw, b_nhw : ndarray, shape (N, H, W)
+        Matched stacks of flat-sky patches (e.g. CIB and tSZ).
+    J : int
+        Number of dyadic scales.
+    L : int
+        Number of orientations.
+    device : str or None
+        ``'cuda'``, ``'cpu'``, or ``None`` (auto-detect).
+    batch_size : int or None
+        Process the stacks in chunks of this many map pairs to bound memory
+        (exact; per-image normalisation).  None = single pass.
+
+    Returns
+    -------
+    dict
+        Full two-field covariance dictionary from Cheng et al., with keys
+        ``'C01_iso'``, ``'C11_iso'``, ``'Corr00_iso'``, ``'for_synthesis_iso'``
+        etc.  Returns ``None`` if the Cheng et al. backend is not available.
+    """
+    _ensure_cheng_on_path()
+    try:
+        import scattering
+        import torch
+    except ImportError:
+        warnings.warn(
+            "Two-field scattering covariance requires the Cheng et al. "
+            "scattering package. Install from: "
+            "https://github.com/SihaoCheng/scattering_transform",
+            UserWarning,
+        )
+        return None
+
+    assert a_nhw.shape == b_nhw.shape
+    N, H, W = a_nhw.shape
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    cheng_device = "gpu" if device == "cuda" else "cpu"
+
+    st_calc = scattering.Scattering2d(M=H, N=W, J=J, L=L, device=cheng_device)
+    a_f32, b_f32 = a_nhw.astype(np.float32), b_nhw.astype(np.float32)
+    if batch_size is None or batch_size >= N:
+        return _to_numpy(st_calc.scattering_cov_2fields(torch.tensor(a_f32), torch.tensor(b_f32)))
+    batches, sizes = [], []
+    for i0 in range(0, N, batch_size):
+        s_cov = st_calc.scattering_cov_2fields(
+            torch.tensor(a_f32[i0 : i0 + batch_size]),
+            torch.tensor(b_f32[i0 : i0 + batch_size]),
+        )
+        batches.append(_to_numpy(s_cov))
+        sizes.append(len(a_f32[i0 : i0 + batch_size]))
+    return _concat_batches(batches, sizes)
 
 
 # ---------------------------------------------------------------------------

@@ -152,3 +152,75 @@ See `docs/tutorials/12_minkowski_tensors.ipynb` for β(ν) curves (2×3 grid acr
 **Obstacle:** Sobel-based normal estimation has O(1 pixel) error on sharp boundaries; this is negligible for the 256×256 patches in use but could matter for very small excursion sets (ν near 0.95). Smoothing the binary mask before gradient estimation is a simple fix if needed. Interpretation requires care at extreme thresholds where excursion sets are nearly empty or nearly full — those entries are already masked to β = 1 in the implementation.
 
 **Reference:** Schroder-Turk et al. (2013), *New J. Phys.* 15 083028.
+
+---
+
+## 12. Multi-Channel (3–5 Field) Generation — Deadline Feasibility Assessment (added 6 Jul 2026)
+
+Extends #3 with a concrete go/no-go against the 12 July submission and a plan
+for generalising the evaluation suite past two fields. Timeline anchors:
+results writing Wed 8 Jul, pipeline polish Thu 10 Jul, submission Sun 12 Jul
+23:59 BST (GitLab locks); one full training run costs ~30 h wall on an A100
+(100k steps, observed for v4) plus ~2 h sampling and ~1 h evaluation.
+
+### Verdict per candidate channel
+
+| Channel | Data availability | Preprocessing cost | Physics interest | Pre-deadline feasible? |
+|---|---|---|---|---|
+| **kSZ (3rd)** | Agora lensed kSZ map exists on the Globus collection | ~½ day (same mask + patch pipeline, new FITS) | High — spectrally flat, sign-symmetric, correlated with tSZ via the same haloes; tests whether the model learns a *weak* correlated field | **Marginal** — only if training launches Tue 7 Jul and works first try; collides with the compute cutoff and leaves no retry budget |
+| 2nd CIB frequency (95 or 857 GHz) | Agora CIB maps at multiple frequencies | Lowest (~½ day, identical pipeline) | Moderate — near-unity cross-correlation tests correlated-channel fidelity, less new physics | Same marginal timeline; scientifically the cheapest win but also the least novel |
+| Radio galaxies | Agora radio catalogue | High — point-source-dominated field needs its own masking/normalisation decisions | High but risky — tails far heavier than tSZ, exactly the failure mode v4 already shows | **No** (post-submission) |
+| 4–5 channels combined | — | Sum of the above | — | **No** (post-submission) |
+
+**Recommendation:** do not gate the report on any new training run. Land the
+*channel-generic evaluation suite* (below) as code — it is cheap, testable
+without a new model, and strengthens the assessed repo — and present this
+section's analysis as the feasibility study in the report's extensions
+discussion. If Tuesday frees up unexpectedly, kSZ-3-channel is the only
+candidate worth launching, with the explicit fallback that the report ships
+on v4 results alone.
+
+### Generalising the evaluation suite to C > 2 fields
+
+Current state: `pipeline/evaluate.py` passes `(cib, tsz)` pairs; caches are
+keyed `{statistic}__{source}.npz`. Change the source container to
+`(N, C, H, W)` arrays plus a `channel_names` list from the config
+(`channels: [cib_150, tsz_150, ksz_150]`, per-channel `norm_params` of length
+2C), and key caches `{statistic}__{source}__{channel|pair}` so existing
+two-channel caches stay valid under the names `cib`/`tsz`.
+
+Per-statistic work:
+
+- **Trivial per-channel loops** (power spectrum, pixel histograms — needs
+  per-channel bin ranges in config, MFs, MTs, peaks/minima, WST S1/S2 and
+  single-field covariance): iterate `channel_names` instead of the literal
+  `[("cib", cib), ("tsz", tsz)]`.
+- **Pairwise statistics** (cross-spectrum, two-field WST covariance): loop
+  `itertools.combinations(channel_names, 2)` — C(3,2)=3, C(5,2)=10 pairs;
+  runtime scales accordingly (two-field WST is the expensive one: ~35 min per
+  pair per 100 maps on CPU, so cap `n_maps` or pairs in config).
+- **Summed moments**: already field-count-agnostic (sum all channels + one
+  noise realisation).
+- **Cross moments**: the 12-label set is hard-coded for (a, b). Generalise to
+  all multiset moments ⟨∏ ch_i^{m_i}⟩ of order 2–4: 6/10/15 combinations for
+  C=3 (31 panels) — generate labels programmatically and split plots by
+  moment order. This is the largest single code change.
+- **tSZ stacking**: keep keyed to the tSZ channel by name (it is a
+  tSZ-specific statistic). Optional new statistic: cross-stacking — cutouts
+  of *other* channels at tSZ-selected peak locations, which directly probes
+  the learned inter-channel correlation at cluster sites.
+- **Model/training plumbing**: `Unet(channels=C)` and the sampler are already
+  parameterised; `run.py`'s `_FIXED_SETTINGS` guard currently rejects
+  `channels != 2` and would be lifted as part of Tier 3.
+
+Estimated effort: ~1 day for the evaluate.py generalisation + tests (mock
+3-channel data, no trained model needed), ~½ day preprocessing per new
+channel, 30 h training + ~3 h sampling/evaluation per model. The code
+generalisation fits Thu 10 Jul if the report is on track; everything
+requiring GPU time is post-submission (GitHub v0.2).
+
+**Obstacle (inherited from #3):** kSZ is ~an order of magnitude fainter than
+tSZ; per-channel z-scoring equalises training amplitudes, but the v4 tSZ
+tail-deficit finding suggests weak heavy-tailed channels are exactly where
+the model underperforms — build the amplitude diagnostics (fixed-reference
+histograms, stacking counts) into the multi-channel suite from day one.

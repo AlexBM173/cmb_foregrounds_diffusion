@@ -72,7 +72,8 @@ autodoc_typehints = "description"
 nbsphinx_execute = "never"
 nbsphinx_allow_errors = True
 
-templates_path = ["_templates"]
 exclude_patterns = ["_build", "**.ipynb_checkpoints"]
 
-html_static_path = ["_static"]
+# no custom static assets or templates yet — empty dirs are not tracked by
+# git, and a missing html_static_path entry fails the -W docs build on CI
+html_static_path = []

@@ -35,6 +35,15 @@ jobs:
       - name: Install package with dev extras
         run: pip install -e ".[dev]"
 
+      # quantimpy (Minkowski functionals) ships no wheels for Python >= 3.10
+      # and its sdist pins an old numpy inside the isolated build env, which
+      # produces a binary-incompatible extension at import time. Build it
+      # against the runtime numpy instead so the MF known-result tests run.
+      - name: Install quantimpy against runtime numpy
+        run: |
+          pip install cython setuptools
+          pip install --no-cache-dir --no-build-isolation --no-binary quantimpy "quantimpy>=0.2.6"
+
       - name: Run test suite
         # Includes tests/benchmarks/test_equivalence.py — the §2.6 correctness
         # gate that catches optimisation regressions. It is CPU-only and fast

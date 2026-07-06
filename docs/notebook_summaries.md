@@ -116,7 +116,7 @@ Computes and plots the angular auto- and cross-power spectra of CIB and tSZ chan
 
 ## `docs/tutorials/07_higher_order_stats.ipynb`
 
-Computes collapsed equilateral bispectrum (S3) and trispectrum (S4) statistics for Agora, DDPM, and Gaussian samples by bandpass-filtering into 8 ℓ-bands (Δℓ = 720, centred ℓ ≈ 300–5700) and computing variance/skewness/kurtosis of the filtered maps. Covers both the single summed-channel analysis (primary paper result) and all 12 CIB×tSZ cross-moment combinations (Appendix C). Adds three ILC noise tiers (SPT-3G, S4-Wide, S4-Ultra Deep). Moment computation is slow (~hours for full datasets); results are saved to `data/moments_*.npy` and reloaded for plotting.
+Computes collapsed equilateral bispectrum (S3) and trispectrum (S4) statistics for Agora, DDPM, and Gaussian samples by bandpass-filtering into 8 ℓ-bands (Δℓ = 720, centred ℓ ≈ 300–5700) and computing variance/skewness/kurtosis of the filtered maps. Covers both the single summed-channel analysis (primary paper result) and all 12 CIB×tSZ cross-moment combinations (Appendix C). The report convention uses only the S4-Ultra Deep ILC noise tier (means from noiseless maps, error bars from the noisy tier; no debiasing). Moment computation is slow (~hours for full datasets); results are saved to `data/moments_*.npy` and reloaded for plotting.
 
 **Paper relation:** §3.2 (statistics definitions), §4.6 (Figure 7 — collapsed bispectrum/trispectrum of summed channel), Appendix C (Figures 10–11 — full cross-moment breakdown).
 
@@ -126,17 +126,17 @@ Computes collapsed equilateral bispectrum (S3) and trispectrum (S4) statistics f
 
 ## `docs/tutorials/08_morphology_and_histograms.ipynb`
 
-Evaluates one-point statistics and morphological properties of DDPM samples. Plots normalised pixel-intensity histograms (1000 bins, Gaussian-smoothed) for CIB and tSZ maps from all three sources, then computes Minkowski functionals M0 (area fraction), M1 (total boundary length), and M2 (Euler characteristic) of excursion sets across 50 thresholds ν ∈ [0, 1] via the `quantimpy` (Boelens & Tchelepi) package.
+Evaluates one-point statistics and morphological properties of DDPM samples. Plots pixel-intensity histograms in physical units (1000 bins over [0, 100] µK for CIB and [−100, 0] µK for tSZ, Gaussian-smoothed at plot time) for all three sources, then computes Minkowski functionals M0 (area), M1 ((1/2π) × boundary length), and M2 ((1/2π²) × integrated curvature; χ = πM2) of excursion sets across 50 thresholds ν ∈ [0, 1] via the `quantimpy` (Boelens & Tchelepi) package.
 
 **Paper relation:** §4.4 (Figure 5 — pixel histograms), §4.5 (Figure 6 — Minkowski functionals).
 
-**Module relation:** Uses `compute_mfs` from `morphology.py` and `apply_maxmin_normalization` / `apply_stdnorm` from `preprocessing.py`. (Before the refactor, `compute_mfs` was in `statistics.py`.) Requires `quantimpy` to be installed from source with numpy 1.26.4.
+**Module relation:** Uses `compute_mfs` from `morphology.py` and `apply_maxmin_normalization` / `apply_stdnorm` from `preprocessing.py`. (Before the refactor, `compute_mfs` was in `statistics.py`.) quantimpy ships no wheels for Python ≥ 3.10: install with `pip install --no-cache-dir --no-build-isolation --no-binary quantimpy quantimpy` so it compiles against the runtime numpy.
 
 ---
 
 ## `docs/tutorials/09_tsz_stacking.ipynb`
 
-Implements the tSZ stacking analysis from §4.2 as a self-contained tutorial, replacing the inline SNR logic in the older `docs/stack_tsz_based_on_snr.ipynb`. Selects pixels above SNR thresholds in three bins (5–10σ, 10–20σ, ≥20σ) from Agora tSZ maps, extracts 22-pixel (≈31') cutouts centred on those pixels from both Agora and DDPM maps, stacks them, and plots stacked images, radial profiles (1' bins out to 10'), and Agora/DDPM ratios.
+Implements the tSZ stacking analysis from §4.2 as a self-contained tutorial, replacing the inline SNR logic in the older `docs/stack_tsz_based_on_snr.ipynb`. Selects local peaks of the sign-flipped tSZ decrement in three SNR bins (5–10σ, 10–20σ, ≥20σ), with σ referenced to the Agora maps so every source shares the same physical thresholds, and extracts 22-pixel (≈31') cutouts centred on those peaks from both Agora and DDPM maps, stacks them, and plots stacked images, radial profiles (1' bins out to 10'), and Agora/DDPM ratios.
 
 **Paper relation:** §4.2 (Figure 3 — stacked tSZ profiles in three SNR bins).
 
@@ -150,7 +150,7 @@ Evaluates non-Gaussian structure in CIB and tSZ patches using peak and minima co
 
 **Paper relation:** No direct paper section — this is a proposed extension statistic. Peak counts are a well-established non-Gaussianity probe sensitive to cluster abundance at different signal levels, complementing the bandpass moment analysis in §4.6.
 
-**Module relation:** Uses `compute_peak_minima_counts` from `peak_counts.py`. Map loading and denormalisation follow the same pattern as the other evaluation notebooks: loads norm params from `norm_params_2mJy.npy`, applies the 80/20 train/test split with `seed=42`, and denormalises DDPM samples from the `new_samples_*.npy` file.
+**Module relation:** Uses `compute_peak_minima_counts` from `peak_counts.py`. Map loading and denormalisation follow the same pattern as the other evaluation notebooks: loads norm params from `norm_params_2mJy.npy`, applies the 80/20 train/test split with `seed=42`, and denormalises DDPM samples loaded from `runs/v4_zscore_2mJy_a100/samples/`.
 
 ---
 
@@ -162,6 +162,7 @@ Computes scattering transform coefficients for CIB and tSZ patches and compares 
 - **S2** (second-order): cross-scale coupling matrix for pairs (j1, j2) with j2 > j1 — visualised as a DDPM/Agora ratio heatmap per channel.
 - **Flattened residuals**: full scattering feature vector (S1 + S2 concatenated via `scattering_summary`) normalised by Agora σ, shown as a bar chart.
 - **C11** (optional, Cheng et al. only): scattering covariance matrix, mean |C11_iso| visualised as a j2-j3 heatmap.
+- **Scattering covariance + two-field cross covariance** (report WST tests 3–4): `compute_scattering_covariance` and `compute_scattering_covariance_2fields` with `batch_size` chunking; at J=5, L=4 the isotropic `for_synthesis_iso` vectors have 631 (single-field) and 2262 (two-field) coefficients.
 
 Outputs `plots/scattering_S1.pdf`, `plots/scattering_S2_ratio.pdf`, `plots/scattering_residuals.pdf`, and optionally `plots/scattering_C11.pdf`.
 
@@ -242,7 +243,7 @@ Profiling and benchmarking of the evaluation-statistics functions. Builds synthe
 
 ## `docs/tutorials/14_paper_figures.ipynb`
 
-Generates the publication figures from the trained checkpoint and AGORA maps: multifrequency and CIB–tSZ map panels, power-spectrum comparisons, higher-order moments, and Minkowski functionals. Applies the `plot_style.apply()` Wong-palette style and saves each figure as PDF (LaTeX) + PNG (300 dpi). Depends on the outputs of notebooks 06–09 and requires the FITS data / checkpoint, so it is not executed on ReadTheDocs.
+Reproduces the figures of Prabhu et al. under paper-era conventions (three noise tiers, affine rescaling) for side-by-side comparison. Report figures come from `run.py evaluate` (cached statistics + plots in `runs/v4_zscore_2mJy_a100/`). Covers: multifrequency and CIB–tSZ map panels, power-spectrum comparisons, higher-order moments, and Minkowski functionals. Applies the `plot_style.apply()` Wong-palette style and saves each figure as PDF (LaTeX) + PNG (300 dpi). Depends on the outputs of notebooks 06–09 and requires the FITS data / checkpoint, so it is not executed on ReadTheDocs.
 
 **Paper relation:** Reproduces the figures of Prabhu et al. (§4).
 

@@ -7,6 +7,7 @@ from foregrounds_diffusion.flatmaps import (
     convert_eb_qu,
     get_lpf_hpf,
     get_lxly,
+    make_correlated_gaussian_fields,
     make_gaussian_realisation,
     map2cl,
     radial_profile,
@@ -116,6 +117,100 @@ def test_make_gaussian_realisation_correlated_two_field(flatskymapparams_256):
     assert np.all(cl_b >= 0)
     _, cl_cross = map2cl(flatskymapparams_256, sim[0], sim[1])
     assert np.mean(cl_cross) > 0
+
+
+# ---------------------------------------------------------------------------
+# make_correlated_gaussian_fields (N-field generalisation)
+# ---------------------------------------------------------------------------
+
+
+def _three_field_matrix(el):
+    """Red autos + a valid (PSD) target correlation matrix, shape (3, 3, len(el))."""
+    amp = [3.0, 1.0, 0.5]
+    auto = [a * (el / 1000.0) ** -2.0 for a in amp]
+    R = np.array([[1.0, 0.6, 0.3], [0.6, 1.0, 0.4], [0.3, 0.4, 1.0]])
+    clm = np.zeros((3, 3, len(el)))
+    for i in range(3):
+        for j in range(3):
+            clm[i, j] = R[i, j] * np.sqrt(auto[i] * auto[j])
+    return clm, R
+
+
+def test_correlated_fields_shape_and_zero_mean(flatskymapparams_256):
+    el = np.arange(1, 8000.0)
+    clm, _ = _three_field_matrix(el)
+    rng = np.random.default_rng(0)
+    one = make_correlated_gaussian_fields(flatskymapparams_256, el, clm, rng=rng)
+    assert one.shape == (3, flatskymapparams_256[1], flatskymapparams_256[0])
+    assert np.allclose(one.mean(axis=(-2, -1)), 0.0, atol=1e-6)
+    many = make_correlated_gaussian_fields(flatskymapparams_256, el, clm, n_realisations=4, rng=rng)
+    assert many.shape == (4, 3, flatskymapparams_256[1], flatskymapparams_256[0])
+
+
+def test_correlated_fields_recovers_spectra(flatskymapparams_256):
+    # The full C×C spectrum matrix must be reproduced: autos and cross r's.
+    el = np.arange(1, 8000.0)
+    clm, R = _three_field_matrix(el)
+    n = 80
+    fields = make_correlated_gaussian_fields(
+        flatskymapparams_256, el, clm, n_realisations=n, rng=np.random.default_rng(1)
+    )
+    binkw = dict(binsize=200, minbin=300, maxbin=6000)
+    autos = {}
+    for i in range(3):
+        acc = 0.0
+        for r in range(n):
+            e, cl = map2cl(flatskymapparams_256, fields[r, i], **binkw)
+            acc = acc + cl
+        autos[i] = acc / n
+        inp = np.interp(e, el, clm[i, i])
+        ok = inp > 0
+        assert np.median(autos[i][ok] / inp[ok]) == pytest.approx(1.0, abs=0.15)
+    for i in range(3):
+        for j in range(i + 1, 3):
+            acc = 0.0
+            for r in range(n):
+                e, cx = map2cl(flatskymapparams_256, fields[r, i], fields[r, j], **binkw)
+                acc = acc + cx
+            r_meas = np.median((acc / n / np.sqrt(autos[i] * autos[j]))[2:-2])
+            assert r_meas == pytest.approx(R[i, j], abs=0.07)
+
+
+def test_correlated_fields_matches_two_field(flatskymapparams_256):
+    # C=2 is statistically equivalent to make_gaussian_realisation (same spectra).
+    el = np.arange(1, 8000.0)
+    clm, R = _three_field_matrix(el)
+    clm2 = clm[:2, :2]
+    n = 80
+    fields = make_correlated_gaussian_fields(
+        flatskymapparams_256, el, clm2, n_realisations=n, rng=np.random.default_rng(2)
+    )
+    binkw = dict(binsize=200, minbin=300, maxbin=6000)
+    a0 = a1 = ax = 0.0
+    for r in range(n):
+        _, c0 = map2cl(flatskymapparams_256, fields[r, 0], **binkw)
+        _, c1 = map2cl(flatskymapparams_256, fields[r, 1], **binkw)
+        e, cx = map2cl(flatskymapparams_256, fields[r, 0], fields[r, 1], **binkw)
+        a0, a1, ax = a0 + c0, a1 + c1, ax + cx
+    inp0 = np.interp(e, el, clm2[0, 0])
+    assert np.median((a0 / n / inp0)[inp0 > 0]) == pytest.approx(1.0, abs=0.15)
+    r_meas = np.median((ax / np.sqrt(a0 * a1))[2:-2])
+    assert r_meas == pytest.approx(R[0, 1], abs=0.07)
+
+
+def test_correlated_fields_regularises_non_psd(flatskymapparams_256):
+    # An over-correlated (r > 1) matrix is non-PSD; eigenvalue clipping must keep
+    # the output finite rather than raising.
+    el = np.arange(1, 8000.0)
+    clm, _ = _three_field_matrix(el)
+    auto0 = clm[0, 0]
+    auto1 = clm[1, 1]
+    clm[0, 1] = clm[1, 0] = 1.3 * np.sqrt(auto0 * auto1)  # r = 1.3 → non-PSD
+    out = make_correlated_gaussian_fields(
+        flatskymapparams_256, el, clm, rng=np.random.default_rng(3)
+    )
+    assert out.shape[0] == 3
+    assert np.all(np.isfinite(out))
 
 
 # ---------------------------------------------------------------------------

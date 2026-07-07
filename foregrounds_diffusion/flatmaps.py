@@ -384,6 +384,103 @@ def make_gaussian_realisation(mapparams, el, cl, cl2=None, cl12=None, bl=None, q
     return SIM
 
 
+def make_correlated_gaussian_fields(mapparams, el, cl_matrix, n_realisations=1, rng=None):
+    """Generate C correlated Gaussian flat-sky fields from a C×C spectrum matrix.
+
+    N-field generalisation of :func:`make_gaussian_realisation`. Produces maps
+    whose full set of auto- and cross-power spectra match ``cl_matrix``, so it
+    serves as the Gaussian baseline for a C-channel model (the reference that
+    isolates genuinely non-Gaussian structure). For ``C == 2`` the output is
+    statistically equivalent to :func:`make_gaussian_realisation` (identical
+    spectra; the realisation differs because a symmetric matrix square root is
+    used in place of the lower-Cholesky factor — see below).
+
+    Construction: at each 2-D Fourier mode ``k`` the C fields have covariance
+    ``S(k)`` (the auto/cross spectra interpolated onto the grid). We draw C
+    independent white-noise Fourier fields ``g`` and colour them by a per-mode
+    factor ``A(k)`` with ``A A^T = S(k)``, so
+    ``<f_i f_j^*> = S_ij``. ``A`` is the symmetric square root obtained from the
+    eigendecomposition ``S = V Λ V^T``, ``A = V √Λ_+ V^T``.
+
+    Why eigendecomposition, not Cholesky: measured cross-spectra can make
+    ``S(k)`` slightly non-positive-definite (e.g. an estimated correlation
+    coefficient > 1 from finite-sample noise), which makes a raw Cholesky fail.
+    Clipping the eigenvalues at zero (``Λ_+``) projects ``S`` to the nearest
+    positive-semi-definite matrix in one step, regularising and factorising
+    together. The number of clipped modes is returned via ``print`` so the
+    regularisation is auditable.
+
+    Parameters
+    ----------
+    mapparams : list
+        ``[nx, ny, dx, dy]`` — dx/dy in arcminutes; see :func:`get_lxly`.
+    el : array_like
+        Multipoles at which ``cl_matrix`` is defined.
+    cl_matrix : array_like, shape (C, C, len(el))
+        Symmetric matrix of 1-D spectra: ``cl_matrix[i, j]`` is the cross-
+        spectrum of fields *i* and *j* (auto-spectrum on the diagonal). Only the
+        upper triangle is read; symmetry is enforced.
+    n_realisations : int
+        Number of independent realisations to draw (default 1).
+    rng : numpy.random.Generator, optional
+        Random generator; a default one is created when omitted.
+
+    Returns
+    -------
+    ndarray
+        ``(C, ny, nx)`` when ``n_realisations == 1``, else
+        ``(n_realisations, C, ny, nx)``. Each field is zero-mean.
+    """
+    nx, ny, dx, dy = mapparams
+    dx_rad = dx * np.radians(1.0 / 60.0)
+    dy_rad = dy * np.radians(1.0 / 60.0)
+    norm = np.sqrt(1.0 / (dx_rad * dy_rad))
+
+    cl_matrix = np.asarray(cl_matrix, dtype=float)
+    C = cl_matrix.shape[0]
+    if cl_matrix.ndim != 3 or cl_matrix.shape[1] != C:
+        raise ValueError(f"cl_matrix must have shape (C, C, len(el)); got {cl_matrix.shape}")
+
+    # Interpolate every auto/cross spectrum onto the 2-D Fourier grid, assembling
+    # the per-mode covariance S2d with shape (npix, C, C).
+    npix = nx * ny
+    S2d = np.zeros((npix, C, C))
+    for i in range(C):
+        for j in range(i, C):
+            cl2d_ij = np.nan_to_num(cl_to_cl2d(el, cl_matrix[i, j], mapparams), nan=0.0).ravel()
+            S2d[:, i, j] = cl2d_ij
+            S2d[:, j, i] = cl2d_ij
+
+    # Per-mode symmetric square root with eigenvalue clipping (PSD projection).
+    evals, evecs = np.linalg.eigh(S2d)  # ascending; evecs columns are eigenvectors
+    n_neg = int(np.count_nonzero(evals < 0))
+    if n_neg:
+        worst = float(evals.min())
+        print(
+            f"[make_correlated_gaussian_fields] clipped {n_neg} negative eigenvalue(s) "
+            f"across {npix} modes × {C} (worst {worst:.3e}) — cl_matrix not fully PSD"
+        )
+    sqrt_evals = np.sqrt(np.clip(evals, 0.0, None))
+    # A = V diag(√Λ_+) V^T  (symmetric, A @ A = S_reg): (npix, C, C)
+    A = (evecs * sqrt_evals[:, None, :]) @ np.transpose(evecs, (0, 2, 1))
+    A = A.reshape(ny, nx, C, C)  # cl_to_cl2d grid is (ny, nx) (meshgrid xy)
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    out = np.empty((n_realisations, C, ny, nx))
+    for r in range(n_realisations):
+        # C independent Hermitian white-noise Fourier fields (fft of real noise).
+        g_fft = np.fft.fft2(rng.standard_normal((C, ny, nx)), axes=(-2, -1))
+        # f_i(k) = Σ_j A_ij(k) g_j(k), coloured and normalised.
+        fields_fft = np.einsum("yxij,jyx->iyx", A, g_fft) * norm
+        fields = np.fft.ifft2(fields_fft, axes=(-2, -1)).real
+        fields -= fields.mean(axis=(-2, -1), keepdims=True)
+        out[r] = fields
+
+    return out[0] if n_realisations == 1 else out
+
+
 # ---------------------------------------------------------------------------
 # Polarisation rotation helper
 # ---------------------------------------------------------------------------

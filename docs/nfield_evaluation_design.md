@@ -189,6 +189,28 @@ Note: the v4-vs-v5 comparison is intentionally **not** a work item (§5).
 
 ---
 
+## 7b. Plotting conventions (apply to every eval figure)
+
+- **Power/cross spectra are plotted as** $\mathcal{D}_\ell = \ell(\ell+1)C_\ell/2\pi$,
+  never raw $C_\ell$. Applies to all C auto-spectra and all C(C−1)/2 cross-spectra.
+- **Every axis is labelled with its physical unit in LaTeX** (matplotlib mathtext).
+  x-axis of spectra: multipole $\ell$. Per-panel $\mathcal{D}_\ell$ units:
+
+  | quantity | y-axis label (LaTeX) | unit |
+  |---|---|---|
+  | temperature auto (CIB, tSZ, kSZ) | `$\mathcal{D}_\ell\ [\mu\mathrm{K}^2]$` | µK² |
+  | κ auto | `$\mathcal{D}_\ell^{\kappa\kappa}$` | dimensionless |
+  | temp×temp cross | `$\mathcal{D}_\ell^{XY}\ [\mu\mathrm{K}^2]$` | µK² |
+  | temp×κ cross (e.g. tSZ×κ) | `$\mathcal{D}_\ell^{X\kappa}\ [\mu\mathrm{K}]$` | µK |
+
+- **Pixel histograms:** x-axis in z-score units (σ) — the fields are compared in
+  the shared normalised space; label `$(x-\mu)/\sigma$` or `field / \sigma`.
+- **Stacking:** cutout/profile amplitude in the channel's physical unit
+  (`$\mu\mathrm{K}$` for tSZ/kSZ, dimensionless $\kappa$ for lensing); radial
+  axis in arcmin (`$\theta\ [\mathrm{arcmin}]$`).
+- Titles carry the channel/pair label (e.g. `CIB × κ`); use a consistent
+  per-source colour (`SOURCE_COLORS`) and a legend on the first panel only.
+
 ## 8. Resolved decisions (7 Jul 2026)
 
 1. **Cross-moments** — compute **all** 6 pairs × 12 = 72 combinations; select

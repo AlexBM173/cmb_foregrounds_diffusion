@@ -437,7 +437,14 @@ class CrossSpectrum(Statistic):
 
 
 class Moments(Statistic):
-    """S2/S3/S4 of the summed CIB+tSZ(+noise) field per ℓ-band.
+    """S2/S3/S4 of the summed temperature field per ℓ-band, plus per-field
+    moments of any non-temperature channel (κ).
+
+    The summed field adds the *temperature* channels only (CIB+tSZ+kSZ = total
+    150 GHz foreground temperature); κ is dimensionless and cannot be summed
+    with µK fields, so its moments are computed on its own (``field_kappa``) and
+    always noiseless — ILC residual noise is a temperature quantity that does
+    not apply to lensing convergence.
 
     Noise convention (report §Summary statistics): mean curves always come
     from the noiseless maps, so no noise debiasing is required; the noisy
@@ -446,8 +453,15 @@ class Moments(Statistic):
     """
 
     name = "moments"
+    n_field = True
     moment_fn = staticmethod(compute_summed_moments)
     prefix = "summed"
+
+    def _temp_other(self):
+        """(temperature channel keys, non-temperature channel keys)."""
+        temp = [k for k in self.channel_labels if _CHANNEL_BY_KEY[k][2] == "uK"]
+        other = [k for k in self.channel_labels if _CHANNEL_BY_KEY[k][2] != "uK"]
+        return temp, other
 
     def _variance_tier(self):
         """Tier whose scatter supplies the error bars ('none' if no noisy tier)."""
@@ -474,54 +488,97 @@ class Moments(Statistic):
         out = self.moment_fn(cib, tsz, filters, n_jobs=self.n_jobs)
         return out[0] if isinstance(out, tuple) else out
 
-    def compute(self, cib, tsz, source):
+    def compute(self, maps, source):
         centers, filters = self._bands()
+        temp_keys, other_keys = self._temp_other()
+        li = {k: i for i, k in enumerate(self.channel_labels)}
         result = {"band_centers": centers}
+
+        # Summed temperature field: base + rest; ILC noise added once so the
+        # summed field contains it exactly once (matches the 2-field pipeline).
+        base = maps[li[temp_keys[0]]]
+        rest = sum((maps[li[k]] for k in temp_keys[1:]), np.zeros_like(base))
         for tier in self.params.get("noise_tiers", ["none"]):
             if tier == "none":
-                noisy_cib = cib
+                a = base
             else:
-                # One realisation per patch, added to a single channel so the
-                # summed field CIB+tSZ+noise contains the noise exactly once.
-                noise = self.noise.realisations(tier, len(cib), context=f"{self.name}|{source}")
-                noisy_cib = cib + noise
-            result[f"{self.prefix}_{tier}"] = self._one_tier(noisy_cib, tsz, filters)
+                noise = self.noise.realisations(tier, len(base), context=f"{self.name}|{source}")
+                a = base + noise
+            result[f"{self.prefix}_{tier}"] = self._one_tier(a, rest, filters)
+
+        # Per-field moments of non-temperature channels (κ), always noiseless.
+        for k in other_keys:
+            fld = maps[li[k]]
+            result[f"field_{k}"] = self._one_tier(fld, np.zeros_like(fld), filters)
         return result
 
     def _labels(self):
         return ["S2", "S3", "S4"]
 
+    def _mean_err_for(self, r, base_key, m_i):
+        """(mean, err) for moment m_i. ``base_key == prefix`` uses the tier
+        convention (noiseless mean, variance-tier err); a ``field_<k>`` key is
+        noiseless so mean and err both come from that single array."""
+        if base_key == self.prefix:
+            return self._mean_and_err(r, m_i)
+        arr = r[base_key]
+        return arr[:, :, m_i].mean(axis=0), arr[:, :, m_i].std(axis=0)
+
+    def _row_specs(self):
+        """(cache-key, row title) per plot row: summed temperature then each κ."""
+        temp_keys, other_keys = self._temp_other()
+        summed_title = "+".join(_channel_display(k) for k in temp_keys)
+        return [(self.prefix, summed_title)] + [
+            (f"field_{k}", _channel_display(k)) for k in other_keys
+        ]
+
     def plot(self, results, plot_path):
         labels = self._labels()
         vtier = self._variance_tier()
-        plt, fig, axes = _subplots(len(labels))
-        for m_i, label in enumerate(labels):
-            ax = axes[m_i]
-            for src, r in self._ordered(results):
-                mean, err = self._mean_and_err(r, m_i)
-                ax.errorbar(
-                    r["band_centers"],
-                    mean,
-                    yerr=err,
-                    color=SOURCE_COLORS[src],
-                    label=src,
-                    marker=".",
-                    ls="-",
-                    capsize=2,
-                )
-            if m_i == 0:
-                ax.set_yscale("log")
-            ax.set_xlabel(r"$\ell$ band centre")
-            ax.set_title(f"{label} (err: {vtier})")
-            if m_i == 0:
-                ax.legend()
+        rows = self._row_specs()
+        plt, fig, axes = _subplots(len(labels), nrows=len(rows))
+        axes = np.atleast_1d(axes).reshape(len(rows), len(labels))
+        for r_i, (base_key, row_title) in enumerate(rows):
+            noiseless = base_key != self.prefix
+            for m_i, label in enumerate(labels):
+                ax = axes[r_i, m_i]
+                for src, r in self._ordered(results):
+                    if noiseless and base_key not in r:
+                        continue
+                    mean, err = self._mean_err_for(r, base_key, m_i)
+                    ax.errorbar(
+                        r["band_centers"],
+                        mean,
+                        yerr=err,
+                        color=SOURCE_COLORS[src],
+                        label=src,
+                        marker=".",
+                        ls="-",
+                        capsize=2,
+                    )
+                if m_i == 0:
+                    ax.set_yscale("log")
+                if r_i == len(rows) - 1:
+                    ax.set_xlabel(r"$\ell$ band centre")
+                tier_note = "noiseless" if noiseless else f"err: {vtier}"
+                ax.set_title(f"{row_title} {label} ({tier_note})")
+                if r_i == 0 and m_i == 0:
+                    ax.legend()
         fig.tight_layout()
         fig.savefig(plot_path, dpi=150)
         plt.close(fig)
 
 
 class CrossMoments(Moments):
-    """All 12 CIB×tSZ cross-moment combinations per ℓ-band (Appendix C)."""
+    """The 12 cross-moment combinations per ℓ-band for every channel pair
+    (Appendix C generalised to C fields).
+
+    All C(C−1)/2 pairs × 12 combinations are computed and cached
+    (``cross_<tier>_<ki>_<kj>``); the quick-look figure shows the primary
+    temperature pair (CIB×tSZ), with the rest available in the cache for
+    targeted analysis. ILC noise is applied only to temperature-temperature
+    pairs (same realisation in both channels); pairs involving κ are computed
+    noiseless (κ has no ILC noise model)."""
 
     name = "cross_moments"
     prefix = "cross"
@@ -544,33 +601,59 @@ class CrossMoments(Moments):
     def _labels(self):
         return self.CROSS_LABELS
 
-    def _one_tier(self, cib, tsz, filters):
-        out, _labels = compute_cross_moments(cib, tsz, filters, n_jobs=self.n_jobs)
+    def _one_tier(self, a, b, filters):
+        out, _labels = compute_cross_moments(a, b, filters, n_jobs=self.n_jobs)
         return out
 
-    def compute(self, cib, tsz, source):
+    def _pairs(self):
+        keys = self.channel_labels
+        return [(keys[i], keys[j]) for i in range(len(keys)) for j in range(i + 1, len(keys))]
+
+    @staticmethod
+    def _both_temp(ki, kj):
+        return _CHANNEL_BY_KEY[ki][2] == "uK" and _CHANNEL_BY_KEY[kj][2] == "uK"
+
+    def _primary_pair(self):
+        for ki, kj in self._pairs():
+            if self._both_temp(ki, kj):
+                return ki, kj
+        return self._pairs()[0]
+
+    def compute(self, maps, source):
         centers, filters = self._bands()
+        li = {k: i for i, k in enumerate(self.channel_labels)}
         result = {"band_centers": centers}
         for tier in self.params.get("noise_tiers", ["none"]):
-            if tier == "none":
-                a, b = cib, tsz
-            else:
-                # Same realisation in both channels — the ILC residual of one
-                # observed sky enters every channel combination identically
-                # (matches the original HPC cross-moment analysis).
-                noise = self.noise.realisations(tier, len(cib), context=f"{self.name}|{source}")
-                a, b = cib + noise, tsz + noise
-            result[f"{self.prefix}_{tier}"] = self._one_tier(a, b, filters)
+            for ki, kj in self._pairs():
+                if tier != "none" and not self._both_temp(ki, kj):
+                    continue  # κ pairs: noiseless only
+                a, b = maps[li[ki]], maps[li[kj]]
+                if tier != "none":
+                    noise = self.noise.realisations(
+                        tier, len(a), context=f"{self.name}|{source}|{ki}_{kj}"
+                    )
+                    a, b = a + noise, b + noise
+                result[f"{self.prefix}_{tier}_{ki}_{kj}"] = self._one_tier(a, b, filters)
         return result
 
+    def _cross_mean_err(self, r, ki, kj, m_i):
+        tiers = self.params.get("noise_tiers", ["none"])
+        mean_key = f"{self.prefix}_{'none' if 'none' in tiers else tiers[0]}_{ki}_{kj}"
+        var_key = f"{self.prefix}_{self._variance_tier()}_{ki}_{kj}"
+        if var_key not in r:  # κ pair — only the noiseless tier exists
+            var_key = mean_key
+        return r[mean_key][:, :, m_i].mean(axis=0), r[var_key][:, :, m_i].std(axis=0)
+
     def plot(self, results, plot_path):
-        vtier = self._variance_tier()
+        ki, kj = self._primary_pair()
         labels = self._labels()
         plt, fig, axes = _subplots(4, nrows=3)
         for m_i, label in enumerate(labels):
             ax = axes[m_i]
             for src, r in self._ordered(results):
-                mean, err = self._mean_and_err(r, m_i)
+                if f"{self.prefix}_none_{ki}_{kj}" not in r:
+                    continue
+                mean, err = self._cross_mean_err(r, ki, kj, m_i)
                 ax.errorbar(
                     r["band_centers"],
                     mean,
@@ -581,11 +664,15 @@ class CrossMoments(Moments):
                     ls="-",
                     capsize=2,
                 )
-            ax.set_title(f"{label} (err: {vtier})")
+            ax.set_title(label)
             if m_i >= 8:
                 ax.set_xlabel(r"$\ell$ band centre")
             if m_i == 0:
                 ax.legend()
+        fig.suptitle(
+            f"cross-moments: {_channel_display(ki)} $\\times$ {_channel_display(kj)} "
+            f"(all {len(self._pairs())} pairs cached)"
+        )
         fig.tight_layout()
         fig.savefig(plot_path, dpi=150)
         plt.close(fig)

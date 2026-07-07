@@ -1,12 +1,17 @@
 import numpy as np
 import pytest
 
-from foregrounds_diffusion.flatmaps import get_lpf_hpf, make_gaussian_realisation
+from foregrounds_diffusion.flatmaps import (
+    get_lpf_hpf,
+    make_correlated_gaussian_fields,
+    make_gaussian_realisation,
+)
 from foregrounds_diffusion.moments import (
     compute_cross_moments,
     compute_summed_moments,
     mean_cls,
     mean_cross_cls,
+    measure_cross_spectrum_matrix,
 )
 
 _EL = np.arange(1, 5000)
@@ -37,6 +42,38 @@ def bp_filters(flatskymapparams):
 # ---------------------------------------------------------------------------
 # mean_cls
 # ---------------------------------------------------------------------------
+
+
+def test_measure_cross_spectrum_matrix_roundtrip(flatskymapparams_256):
+    # Generate C-field maps from a known C×C matrix, then recover it by
+    # measurement — closes the loop between the generator and the measurer.
+    el = np.arange(1, 8000.0)
+    amp = [3.0, 1.0, 0.5]
+    auto = [a * (el / 1000.0) ** -2.0 for a in amp]
+    R = np.array([[1.0, 0.6, 0.3], [0.6, 1.0, 0.4], [0.3, 0.4, 1.0]])
+    clm = np.zeros((3, 3, len(el)))
+    for i in range(3):
+        for j in range(3):
+            clm[i, j] = R[i, j] * np.sqrt(auto[i] * auto[j])
+
+    n = 80
+    fields = make_correlated_gaussian_fields(
+        flatskymapparams_256, el, clm, n_realisations=n, rng=np.random.default_rng(4)
+    )
+    channels = [fields[:, c] for c in range(3)]  # each (n, H, W)
+    e, meas = measure_cross_spectrum_matrix(
+        channels, flatskymapparams_256, lmin=300, lmax=6000, binsize=200
+    )
+    assert meas.shape == (3, 3, len(e))
+    assert np.allclose(meas, np.transpose(meas, (1, 0, 2)))  # symmetric
+    # autos recovered; cross correlation coefficients recovered
+    for i in range(3):
+        inp = np.interp(e, el, clm[i, i])
+        assert np.median((meas[i, i] / inp)[inp > 0]) == pytest.approx(1.0, abs=0.15)
+    for i in range(3):
+        for j in range(i + 1, 3):
+            r_meas = np.median((meas[i, j] / np.sqrt(meas[i, i] * meas[j, j]))[2:-2])
+            assert r_meas == pytest.approx(R[i, j], abs=0.07)
 
 
 def test_mean_cls_return_shapes(patch_stack, flatskymapparams):

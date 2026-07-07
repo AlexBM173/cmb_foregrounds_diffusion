@@ -145,6 +145,60 @@ def mean_cross_cls(maps1, maps2, mapparams, lmin, lmax, binsize, n_jobs=1):
     return el, cls.mean(axis=0), cls.std(axis=0)
 
 
+def measure_cross_spectrum_matrix(maps, mapparams, lmin, lmax, binsize, n_jobs=1):
+    """Measure the full C×C mean auto/cross power-spectrum matrix of a C-field stack.
+
+    The output feeds :func:`~foregrounds_diffusion.flatmaps.make_correlated_gaussian_fields`
+    directly, so measuring a stack's spectra and drawing a matched Gaussian
+    baseline is a two-line round trip.
+
+    Parameters
+    ----------
+    maps : sequence of ndarray
+        The C channel stacks, each of shape (N, H, W) — e.g. a list
+        ``[cib, tsz, ksz, kappa]`` or a single ``(C, N, H, W)`` array. All
+        channels must share the same N, H, W.
+    mapparams : list
+        ``[nx, ny, dx, dy]`` — dx/dy in arcminutes.
+    lmin, lmax : float
+        Multipole range.
+    binsize : float
+        Bin width in ℓ.
+    n_jobs : int
+        Parallel workers passed to :func:`mean_cls` / :func:`mean_cross_cls`.
+
+    Returns
+    -------
+    el : ndarray, shape (n_bins,)
+        Bin centres.
+    cl_matrix : ndarray, shape (C, C, n_bins)
+        Symmetric matrix of mean spectra: ``cl_matrix[i, j]`` is the mean
+        auto- (i == j) or cross- (i != j) power spectrum of channels i and j.
+    """
+    maps = [np.asarray(m) for m in maps]
+    C = len(maps)
+    n = {m.shape[0] for m in maps}
+    if len(n) != 1:
+        raise ValueError(f"all channels must share N; got patch counts {sorted(n)}")
+
+    el = None
+    cl_matrix = None
+    for i in range(C):
+        for j in range(i, C):
+            if i == j:
+                e, mean_cl, _ = mean_cls(maps[i], mapparams, lmin, lmax, binsize, n_jobs=n_jobs)
+            else:
+                e, mean_cl, _ = mean_cross_cls(
+                    maps[i], maps[j], mapparams, lmin, lmax, binsize, n_jobs=n_jobs
+                )
+            if cl_matrix is None:
+                el = e
+                cl_matrix = np.zeros((C, C, len(e)))
+            cl_matrix[i, j] = mean_cl
+            cl_matrix[j, i] = mean_cl
+    return el, cl_matrix
+
+
 # ---------------------------------------------------------------------------
 # Higher-order statistics (bispectrum / trispectrum proxies)
 # ---------------------------------------------------------------------------

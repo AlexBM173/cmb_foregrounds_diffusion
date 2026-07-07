@@ -741,25 +741,28 @@ class PixelHistograms(Statistic):
 
 class MinkowskiFunctionals(Statistic):
     name = "minkowski_functionals"
+    n_field = True
 
-    def compute(self, cib, tsz, source):
+    def compute(self, maps, source):
         from foregrounds_diffusion.morphology import compute_mfs
 
         p = self.params
         thresholds = np.linspace(p["threshold_min"], p["threshold_max"], p["n_thresholds"])
         result = {"thresholds": thresholds}
-        for key, maps in [("cib", cib), ("tsz", tsz)]:
+        for i, key in enumerate(self.channel_labels):
             m0, m1, m2 = compute_mfs(
-                maps, apply_maxmin_normalization, thresholds, n_jobs=self.n_jobs
+                maps[i], apply_maxmin_normalization, thresholds, n_jobs=self.n_jobs
             )
             result[f"M0_{key}"], result[f"M1_{key}"], result[f"M2_{key}"] = m0, m1, m2
         return result
 
     def plot(self, results, plot_path):
-        plt, fig, axes = _subplots(2, nrows=3)
+        keys = self.channel_labels
+        plt, fig, axes = _subplots(len(keys), nrows=3)
+        axes = np.atleast_1d(axes).reshape(3, len(keys))
         for row, mf in enumerate(["M0", "M1", "M2"]):
-            for col, key in enumerate(["cib", "tsz"]):
-                ax = axes[row * 2 + col]
+            for col, key in enumerate(keys):
+                ax = axes[row, col]
                 for src, r in self._ordered(results):
                     arr = r[f"{mf}_{key}"]
                     ax.plot(r["thresholds"], arr.mean(axis=0), color=SOURCE_COLORS[src], label=src)
@@ -771,7 +774,7 @@ class MinkowskiFunctionals(Statistic):
                         alpha=0.2,
                         lw=0,
                     )
-                ax.set_title(f"{mf} — {key.upper()}")
+                ax.set_title(f"{mf} — {_channel_display(key)}")
                 if row == 2:
                     ax.set_xlabel(r"threshold $\nu$")
                 if row == 0 and col == 0:
@@ -1139,27 +1142,30 @@ class KszStacking(_ClusterStack):
 
 class PeakCounts(Statistic):
     name = "peak_counts"
+    n_field = True
     count_fn = staticmethod(count_peaks_binned)
 
-    def compute(self, cib, tsz, source):
+    def compute(self, maps, source):
         p = self.params
         # n_thresholds values are histogram bin EDGES (report: linspace(-1, 5, 30))
         edges = np.linspace(p["threshold_min"], p["threshold_max"], p["n_thresholds"])
         dx_arcmin = self.mapparams[2]
         result = {"thresholds": edges, "bin_centers": 0.5 * (edges[:-1] + edges[1:])}
-        for key, maps in [("cib", cib), ("tsz", tsz)]:
+        for i, key in enumerate(self.channel_labels):
             for fwhm in p["smoothing_fwhm_arcmin"]:
                 result[f"{key}_fwhm{fwhm:g}"] = self.count_fn(
-                    maps, edges, fwhm, pixel_res_arcmin=dx_arcmin
+                    maps[i], edges, fwhm, pixel_res_arcmin=dx_arcmin
                 )
         return result
 
     def plot(self, results, plot_path):
         scales = self.params["smoothing_fwhm_arcmin"]
-        plt, fig, axes = _subplots(len(scales), nrows=2, height=3.4)
-        for row, key in enumerate(["cib", "tsz"]):
+        keys = self.channel_labels
+        plt, fig, axes = _subplots(len(scales), nrows=len(keys), height=3.4)
+        axes = np.atleast_1d(axes).reshape(len(keys), len(scales))
+        for row, key in enumerate(keys):
             for col, fwhm in enumerate(scales):
-                ax = axes[row * len(scales) + col]
+                ax = axes[row, col]
                 for src, r in self._ordered(results):
                     arr = r[f"{key}_fwhm{fwhm:g}"]
                     ax.errorbar(
@@ -1172,8 +1178,8 @@ class PeakCounts(Statistic):
                         ms=3,
                     )
                 ax.set_yscale("log")
-                ax.set_title(f"{key.upper()}, FWHM {fwhm:g}'")
-                if row == 1:
+                ax.set_title(f"{_channel_display(key)}, FWHM {fwhm:g}'")
+                if row == len(keys) - 1:
                     ax.set_xlabel(r"$\nu = T/\sigma$")
                 if row == 0 and col == 0:
                     ax.legend()

@@ -37,14 +37,41 @@ from foregrounds_diffusion.moments import (
     mean_cross_cls,
 )
 from foregrounds_diffusion.peak_counts import count_minima_binned, count_peaks_binned
-from foregrounds_diffusion.preprocessing import (
-    apply_maxmin_normalization,
-    denormalize_dm_maps,
-)
+from foregrounds_diffusion.preprocessing import apply_maxmin_normalization
 from foregrounds_diffusion.stacking import extract_cutouts, select_snr_pixels
 
 SOURCE_COLORS = {"agora": "black", "ddpm": "steelblue", "gaussian": "orangered"}
 SOURCE_ORDER = ["agora", "ddpm", "gaussian"]
+
+# Per-channel metadata, ordered; sliced to the run's channel count
+# (cfg.model.channels). Fields: (key, display label, base unit for axis labels,
+# patch-file template). kappa (CMB lensing convergence) is dimensionless and
+# achromatic — no frequency tag in its filename.
+CHANNEL_META = [
+    ("cib", "CIB", "uK", "CIB_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy"),
+    ("tsz", "tSZ", "uK", "tSZ3_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy"),
+    ("ksz", "kSZ", "uK", "kSZ_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy"),
+    ("kappa", r"$\kappa$", "", "kappa_map_{res}_st6_zscore_{ptsrc}mJy_lp.npy"),
+]
+_CHANNEL_BY_KEY = {m[0]: m for m in CHANNEL_META}
+
+
+def _channel_display(key):
+    return _CHANNEL_BY_KEY[key][1]
+
+
+def _to_dl(el, arr):
+    """Convert C_ell (or its error) to D_ell = l(l+1)C_l / 2pi for plotting."""
+    return el * (el + 1.0) * arr / (2.0 * np.pi)
+
+
+def _dl_ylabel(base_i, base_j):
+    """LaTeX D_ell y-axis label from two channels' base units ('uK' or '')."""
+    n_uk = (base_i == "uK") + (base_j == "uK")
+    if n_uk == 0:
+        return r"$\mathcal{D}_\ell$"
+    unit = r"\mu\mathrm{K}^2" if n_uk == 2 else r"\mu\mathrm{K}"
+    return rf"$\mathcal{{D}}_\ell\ [{unit}]$"
 
 
 def _mapparams(cfg):
@@ -68,67 +95,85 @@ def _test_split_indices(n, cfg):
 
 
 def load_sources(cfg, run):
-    """Load all available map sources in physical units.
+    """Load all available map sources in physical units, as C-channel stacks.
 
     Returns
     -------
     sources : dict
-        ``name -> (cib, tsz)`` with each array of shape (N, H, W).
+        ``name -> maps`` with ``maps`` of shape ``(C, N, H, W)`` (channel-first,
+        physical units), for C = ``cfg.model.channels``.
     norm_params : ndarray
-        ``[cib_mean, cib_std, tsz_mean, tsz_std]`` from patch extraction.
+        The ``2C``-entry ``[mean_0, std_0, mean_1, std_1, ...]`` from extraction.
+    channel_labels : list of str
+        Ordered channel keys (e.g. ``["cib", "tsz", "ksz", "kappa"]``).
     test_idx : ndarray
         Indices of the agora/gaussian test split.
     """
-    ptsrc = cfg.preprocessing.point_source_mjy
+    ptsrc = int(cfg.preprocessing.point_source_mjy)
     res = cfg.data.res
+    C = cfg.model.channels
     patches_dir = Path(cfg.data.patches_dir) if cfg.data.patches_dir else run.patches
+    meta = CHANNEL_META[:C]
+    channel_labels = [m[0] for m in meta]
 
-    cib_file = patches_dir / f"CIB_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy"
-    tsz_file = patches_dir / f"tSZ3_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy"
-    if not cib_file.exists():
-        raise FileNotFoundError(
-            f"patch file not found: {cib_file} — set data.patches_dir to the "
-            "directory holding the notebook-03 outputs"
-        )
+    files = [patches_dir / m[3].format(res=res, ptsrc=ptsrc) for m in meta]
+    for f in files:
+        if not f.exists():
+            raise FileNotFoundError(
+                f"patch file not found: {f} — set data.patches_dir to the directory "
+                "holding the notebook-03 / nb03b outputs for all channels"
+            )
     norm_params = np.load(patches_dir / f"norm_params_{ptsrc}mJy.npy")
-    cib_mean, cib_std, tsz_mean, tsz_std = norm_params
-
-    cib = np.load(cib_file)[:, :, :, 0]
-    tsz = np.load(tsz_file)[:, :, :, 0]
-    test_idx = _test_split_indices(len(cib), cfg)
-    sources = {
-        "agora": (
-            cib[test_idx] * cib_std + cib_mean,
-            tsz[test_idx] * tsz_std + tsz_mean,
+    if len(norm_params) != 2 * C:
+        raise ValueError(
+            f"norm_params has {len(norm_params)} entries, expected {2 * C} for {C} channels"
         )
-    }
-    print(f"[evaluate] agora: {len(test_idx)} test patches (of {len(cib)})")
-    del cib, tsz
+    means, stds = norm_params[0::2], norm_params[1::2]
 
+    def _denorm_stack(zstack):
+        """(C, N, H, W) z-score stack -> physical units, per channel."""
+        return np.stack([zstack[i] * stds[i] + means[i] for i in range(C)], axis=0)
+
+    # agora test split (each patch file is (N, H, W, 1) channels-last, z-score)
+    ch_z = [np.load(f)[:, :, :, 0] for f in files]
+    n_total = len(ch_z[0])
+    test_idx = _test_split_indices(n_total, cfg)
+    sources = {"agora": _denorm_stack(np.stack([c[test_idx] for c in ch_z], axis=0))}
+    print(f"[evaluate] agora: {len(test_idx)} test patches (of {n_total}), {C} channels")
+    del ch_z
+
+    # ddpm samples are (N, C, H, W) z-score -> (C, N, H, W) physical
     sample_files = sorted(run.samples.glob("*.npy")) if run.samples.exists() else []
     if sample_files:
-        ddpm = np.concatenate([np.load(f) for f in sample_files])
-        ddpm = denormalize_dm_maps(ddpm, cib_mean, cib_std, tsz_mean, tsz_std)
-        sources["ddpm"] = (ddpm[:, 0], ddpm[:, 1])
+        ddpm = np.concatenate([np.load(f) for f in sample_files])  # (N, C, H, W)
+        if ddpm.shape[1] != C:
+            raise ValueError(f"ddpm samples have {ddpm.shape[1]} channels, expected {C}")
+        sources["ddpm"] = _denorm_stack(np.moveaxis(ddpm, 1, 0))
         print(f"[evaluate] ddpm: {len(ddpm)} samples from {len(sample_files)} file(s)")
     else:
         print(f"[evaluate] ddpm: no samples in {run.samples} — skipping this source")
 
-    gauss_file = patches_dir / f"gaussian_cib_tsz_{ptsrc}mJy_lp.npy"
+    # gaussian baseline: gaussian_<C>field_...; fall back to the legacy 2-field
+    # gaussian_cib_tsz name for C == 2 so v4 runs still load their baseline.
+    gauss_file = patches_dir / f"gaussian_{C}field_{ptsrc}mJy_lp.npy"
+    if not gauss_file.exists() and C == 2:
+        gauss_file = patches_dir / f"gaussian_cib_tsz_{ptsrc}mJy_lp.npy"
     if gauss_file.exists():
         gauss = np.load(gauss_file)
-        if gauss.ndim == 4 and gauss.shape[1] == 2:  # (N, 2, H, W), z-score space
-            gauss = denormalize_dm_maps(gauss, cib_mean, cib_std, tsz_mean, tsz_std)
-            gauss_cib, gauss_tsz = gauss[:, 0], gauss[:, 1]
-        else:  # (N, H, W, 2) channels-last
-            gauss_cib = gauss[:, :, :, 0] * cib_std + cib_mean
-            gauss_tsz = gauss[:, :, :, 1] * tsz_std + tsz_mean
-        sources["gaussian"] = (gauss_cib[test_idx], gauss_tsz[test_idx])
-        print(f"[evaluate] gaussian: {len(test_idx)} baseline maps")
+        if gauss.ndim == 4 and gauss.shape[1] == C:  # (N, C, H, W) z-score
+            gz = np.moveaxis(gauss, 1, 0)
+        elif gauss.ndim == 4 and gauss.shape[-1] == C:  # (N, H, W, C) channels-last
+            gz = np.moveaxis(gauss, 3, 0)
+        else:
+            raise ValueError(
+                f"gaussian baseline {gauss_file.name} has unexpected shape {gauss.shape}"
+            )
+        sources["gaussian"] = _denorm_stack(gz[:, test_idx])
+        print(f"[evaluate] gaussian: {len(test_idx)} baseline maps ({gauss_file.name})")
     else:
         print(f"[evaluate] gaussian: {gauss_file} not found — skipping this source")
 
-    return sources, norm_params, test_idx
+    return sources, norm_params, channel_labels, test_idx
 
 
 # ---------------------------------------------------------------------------
@@ -167,13 +212,20 @@ class Statistic:
     """One evaluation statistic with npz caching and quick-look plotting."""
 
     name = "base"
+    # n_field statistics receive the full (C, N, H, W) stack via compute(maps,
+    # source); the rest keep the 2-field compute(cib, tsz, source) signature and
+    # are handed channels 0 and 1 (CIB, tSZ) — bit-identical to the C=2 pipeline.
+    n_field = False
 
-    def __init__(self, params, n_jobs, mapparams, noise=None, norm_params=None):
+    def __init__(
+        self, params, n_jobs, mapparams, noise=None, norm_params=None, channel_labels=None
+    ):
         self.params = dict(params)
         self.n_jobs = n_jobs
         self.mapparams = mapparams
         self.noise = noise
         self.norm_params = norm_params
+        self.channel_labels = list(channel_labels) if channel_labels is not None else ["cib", "tsz"]
 
     # -- caching ------------------------------------------------------------
 
@@ -183,9 +235,12 @@ class Statistic:
     def cache_file(self, stats_dir, source):
         return Path(stats_dir) / f"{self.name}__{source}.npz"
 
-    def compute_or_load(self, stats_dir, source, cib, tsz, force=False):
-        """Load the cached result if its parameters match, else compute and save."""
-        n_used = min(self.params.get("n_maps", len(cib)), len(cib))
+    def compute_or_load(self, stats_dir, source, maps, force=False):
+        """Load the cached result if its parameters match, else compute and save.
+
+        ``maps`` is the ``(C, N, H, W)`` channel-first stack for one source.
+        """
+        n_used = min(self.params.get("n_maps", maps.shape[1]), maps.shape[1])
         path = self.cache_file(stats_dir, source)
         if path.exists() and not force:
             with np.load(path, allow_pickle=False) as f:
@@ -196,14 +251,20 @@ class Statistic:
             print(f"[evaluate] {self.name}/{source}: parameters changed — recomputing")
         else:
             print(f"[evaluate] {self.name}/{source}: computing ({n_used} maps)")
-        result = self.compute(cib[:n_used], tsz[:n_used], source)
+        sub = maps[:, :n_used]
+        result = self.compute(sub, source) if self.n_field else self.compute(sub[0], sub[1], source)
         np.savez_compressed(path, __meta__=self._meta(n_used), **result)
         return result
 
     # -- interface ----------------------------------------------------------
 
-    def compute(self, cib, tsz, source):
-        """Return a dict of arrays for one source. Maps are (N, H, W), physical units."""
+    def compute(self, *args):
+        """Return a dict of arrays for one source (physical-unit maps).
+
+        n_field statistics override ``compute(self, maps, source)`` with
+        ``maps`` of shape (C, N, H, W); the rest override
+        ``compute(self, cib, tsz, source)`` with each map (N, H, W).
+        """
         raise NotImplementedError
 
     def plot(self, results, plot_path):
@@ -238,52 +299,46 @@ def _subplots(ncols, nrows=1, width=4.6, height=3.8):
 
 class PowerSpectrum(Statistic):
     name = "power_spectrum"
+    n_field = True
 
-    def compute(self, cib, tsz, source):
+    def compute(self, maps, source):
         p = self.params
-        el, cl_cib, err_cib = mean_cls(
-            cib, self.mapparams, p["lmin"], p["lmax"], p["binsize"], n_jobs=self.n_jobs
-        )
-        _, cl_tsz, err_tsz = mean_cls(
-            tsz, self.mapparams, p["lmin"], p["lmax"], p["binsize"], n_jobs=self.n_jobs
-        )
-        return {
-            "el": el,
-            "cl_cib": cl_cib,
-            "err_cib": err_cib,
-            "cl_tsz": cl_tsz,
-            "err_tsz": err_tsz,
-        }
+        result = {}
+        el = None
+        for i, key in enumerate(self.channel_labels):
+            el, cl, err = mean_cls(
+                maps[i], self.mapparams, p["lmin"], p["lmax"], p["binsize"], n_jobs=self.n_jobs
+            )
+            result[f"cl_{key}"], result[f"err_{key}"] = cl, err
+        result["el"] = el
+        return result
 
     def plot(self, results, plot_path):
-        plt, fig, axes = _subplots(3)
-        for ax, key, title in zip(axes[:2], ["cib", "tsz"], ["CIB", "tSZ"]):
+        keys = self.channel_labels
+        plt, fig, axes = _subplots(len(keys) + 1)
+        for ax, key in zip(axes[: len(keys)], keys):
+            base = _CHANNEL_BY_KEY[key][2]
             for src, r in self._ordered(results):
-                ax.plot(r["el"], r[f"cl_{key}"], color=SOURCE_COLORS[src], label=src)
-                ax.fill_between(
-                    r["el"],
-                    r[f"cl_{key}"] - r[f"err_{key}"],
-                    r[f"cl_{key}"] + r[f"err_{key}"],
-                    color=SOURCE_COLORS[src],
-                    alpha=0.2,
-                    lw=0,
-                )
+                el = r["el"]
+                dl, derr = _to_dl(el, r[f"cl_{key}"]), _to_dl(el, r[f"err_{key}"])
+                ax.plot(el, dl, color=SOURCE_COLORS[src], label=src)
+                ax.fill_between(el, dl - derr, dl + derr, color=SOURCE_COLORS[src], alpha=0.2, lw=0)
             ax.set_xscale("log")
             ax.set_yscale("log")
             ax.set_xlabel(r"$\ell$")
-            ax.set_ylabel(r"$C_\ell$")
-            ax.set_title(title)
+            ax.set_ylabel(_dl_ylabel(base, base))
+            ax.set_title(_channel_display(key))
             ax.legend()
-        ax = axes[2]
+        ax = axes[len(keys)]
         ax.axhline(0, color="k", lw=0.8, ls="--")
         if "agora" in results and "ddpm" in results:
             a, d = results["agora"], results["ddpm"]
-            for key, label in [("cib", "CIB"), ("tsz", "tSZ")]:
+            for key in keys:
                 resid = (a[f"cl_{key}"] - d[f"cl_{key}"]) / (a[f"err_{key}"] + 1e-30)
-                ax.plot(a["el"], resid, label=label)
+                ax.plot(a["el"], resid, label=_channel_display(key))
             ax.legend()
         ax.set_xlabel(r"$\ell$")
-        ax.set_ylabel(r"$(C_\ell^{\rm Agora} - C_\ell^{\rm DDPM})/\sigma$")
+        ax.set_ylabel(r"$(C_\ell^{\mathrm{Agora}} - C_\ell^{\mathrm{DDPM}})/\sigma$")
         ax.set_title("residuals")
         fig.tight_layout()
         fig.savefig(plot_path, dpi=150)
@@ -293,7 +348,7 @@ class PowerSpectrum(Statistic):
         lines = []
         if "agora" in results and "ddpm" in results:
             a, d = results["agora"], results["ddpm"]
-            for key in ["cib", "tsz"]:
+            for key in self.channel_labels:
                 resid = np.abs(a[f"cl_{key}"] - d[f"cl_{key}"]) / (a[f"err_{key}"] + 1e-30)
                 lines.append(
                     f"power_spectrum[{key}]: max |Agora-DDPM| residual "
@@ -304,41 +359,76 @@ class PowerSpectrum(Statistic):
 
 class CrossSpectrum(Statistic):
     name = "cross_spectrum"
+    n_field = True
 
-    def compute(self, cib, tsz, source):
+    def _pairs(self):
+        c = len(self.channel_labels)
+        return [(i, j) for i in range(c) for j in range(i + 1, c)]
+
+    def compute(self, maps, source):
         p = self.params
-        el, cl_x, err_x = mean_cross_cls(
-            cib, tsz, self.mapparams, p["lmin"], p["lmax"], p["binsize"], n_jobs=self.n_jobs
-        )
-        return {"el": el, "cl_cross": cl_x, "err_cross": err_x}
+        keys = self.channel_labels
+        result = {}
+        el = None
+        for i, j in self._pairs():
+            el, cl, err = mean_cross_cls(
+                maps[i],
+                maps[j],
+                self.mapparams,
+                p["lmin"],
+                p["lmax"],
+                p["binsize"],
+                n_jobs=self.n_jobs,
+            )
+            result[f"cl_{keys[i]}_{keys[j]}"] = cl
+            result[f"err_{keys[i]}_{keys[j]}"] = err
+        result["el"] = el
+        return result
 
     def plot(self, results, plot_path):
-        plt, fig, axes = _subplots(2)
-        for src, r in self._ordered(results):
-            axes[0].plot(r["el"], r["cl_cross"], color=SOURCE_COLORS[src], label=src)
-            axes[0].fill_between(
-                r["el"],
-                r["cl_cross"] - r["err_cross"],
-                r["cl_cross"] + r["err_cross"],
-                color=SOURCE_COLORS[src],
-                alpha=0.2,
-                lw=0,
-            )
-        axes[0].set_xscale("log")
-        axes[0].set_yscale("symlog")
-        axes[0].set_xlabel(r"$\ell$")
-        axes[0].set_ylabel(r"$C_\ell^{\rm CIB \times tSZ}$")
-        axes[0].legend()
-        axes[1].axhline(0, color="k", lw=0.8, ls="--")
-        if "agora" in results and "ddpm" in results:
-            a, d = results["agora"], results["ddpm"]
-            resid = (a["cl_cross"] - d["cl_cross"]) / (a["err_cross"] + 1e-30)
-            axes[1].plot(a["el"], resid)
-        axes[1].set_xlabel(r"$\ell$")
-        axes[1].set_ylabel(r"$\Delta C_\ell^{\times}/\sigma$")
+        keys = self.channel_labels
+        pairs = self._pairs()
+        ncols = min(3, len(pairs))
+        nrows = int(np.ceil(len(pairs) / ncols))
+        plt, fig, axes = _subplots(ncols, nrows=nrows)
+        for idx, (i, j) in enumerate(pairs):
+            ax = axes[idx]
+            ki, kj = keys[i], keys[j]
+            base_i, base_j = _CHANNEL_BY_KEY[ki][2], _CHANNEL_BY_KEY[kj][2]
+            for src, r in self._ordered(results):
+                el = r["el"]
+                dl = _to_dl(el, r[f"cl_{ki}_{kj}"])
+                derr = _to_dl(el, r[f"err_{ki}_{kj}"])
+                ax.plot(el, dl, color=SOURCE_COLORS[src], label=src)
+                ax.fill_between(el, dl - derr, dl + derr, color=SOURCE_COLORS[src], alpha=0.2, lw=0)
+            ax.set_xscale("log")
+            ax.set_yscale("symlog")
+            ax.set_xlabel(r"$\ell$")
+            ax.set_ylabel(_dl_ylabel(base_i, base_j))
+            ax.set_title(f"{_channel_display(ki)} $\\times$ {_channel_display(kj)}")
+            if idx == 0:
+                ax.legend()
+        for k in range(len(pairs), len(axes)):
+            axes[k].axis("off")
         fig.tight_layout()
         fig.savefig(plot_path, dpi=150)
         plt.close(fig)
+
+    def summarise(self, results):
+        lines = []
+        keys = self.channel_labels
+        if "agora" in results and "ddpm" in results:
+            a, d = results["agora"], results["ddpm"]
+            for i, j in self._pairs():
+                ki, kj = keys[i], keys[j]
+                resid = np.abs(a[f"cl_{ki}_{kj}"] - d[f"cl_{ki}_{kj}"]) / (
+                    a[f"err_{ki}_{kj}"] + 1e-30
+                )
+                lines.append(
+                    f"cross_spectrum[{ki}×{kj}]: max |Agora-DDPM| residual "
+                    f"{resid.max():.2f}σ (mean {resid.mean():.2f}σ)"
+                )
+        return lines
 
 
 # ---------------------------------------------------------------------------
@@ -516,26 +606,36 @@ class PixelHistograms(Statistic):
     """
 
     name = "pixel_histograms"
+    n_field = True
 
-    def compute(self, cib, tsz, source):
+    def _range(self, key, data):
+        """Per-channel histogram range: config ``<key>_range`` if given, else
+        a data-driven [μ−5σ, μ+8σ] (wide enough for the skewed foreground tails)."""
         p = self.params
-        bins_cib = np.linspace(*p["cib_range"], p["n_bins"] + 1)
-        bins_tsz = np.linspace(*p["tsz_range"], p["n_bins"] + 1)
-        h_cib, _ = np.histogram(cib, bins=bins_cib, density=True)
-        h_tsz, _ = np.histogram(tsz, bins=bins_tsz, density=True)
-        return {
-            "bins_cib": 0.5 * (bins_cib[:-1] + bins_cib[1:]),
-            "bins_tsz": 0.5 * (bins_tsz[:-1] + bins_tsz[1:]),
-            "hist_cib": h_cib,
-            "hist_tsz": h_tsz,
-        }
+        if f"{key}_range" in p:
+            return tuple(p[f"{key}_range"])
+        mu, sd = float(data.mean()), float(data.std())
+        return (mu - 5.0 * sd, mu + 8.0 * sd)
+
+    def compute(self, maps, source):
+        nb = self.params["n_bins"]
+        result = {}
+        for i, key in enumerate(self.channel_labels):
+            lo, hi = self._range(key, maps[i])
+            bins = np.linspace(lo, hi, nb + 1)
+            h, _ = np.histogram(maps[i], bins=bins, density=True)
+            result[f"bins_{key}"] = 0.5 * (bins[:-1] + bins[1:])
+            result[f"hist_{key}"] = h
+        return result
 
     def plot(self, results, plot_path):
         from scipy.ndimage import gaussian_filter1d
 
         sigma = self.params.get("smooth_sigma", 1.0)
-        plt, fig, axes = _subplots(2)
-        for ax, key, title in zip(axes, ["cib", "tsz"], ["CIB", "tSZ"]):
+        keys = self.channel_labels
+        plt, fig, axes = _subplots(len(keys))
+        for ax, key in zip(axes, keys):
+            unit = r" [$\mu$K]" if _CHANNEL_BY_KEY[key][2] == "uK" else ""
             for src, r in self._ordered(results):
                 ax.plot(
                     r[f"bins_{key}"],
@@ -544,7 +644,7 @@ class PixelHistograms(Statistic):
                     label=src,
                 )
             ax.set_yscale("log")
-            ax.set_xlabel(rf"{title} pixel value [$\mu$K]")
+            ax.set_xlabel(f"{_channel_display(key)} pixel value{unit}")
             ax.set_ylabel("PDF")
             ax.legend()
         fig.tight_layout()
@@ -1041,7 +1141,7 @@ def main(cfg, run, dry_run=False):
     run.stats.mkdir(parents=True, exist_ok=True)
     run.plots.mkdir(parents=True, exist_ok=True)
 
-    sources, norm_params, test_idx = load_sources(cfg, run)
+    sources, norm_params, channel_labels, test_idx = load_sources(cfg, run)
     np.savez(
         run.stats / "test_split.npz",
         test_idx=test_idx,
@@ -1080,11 +1180,12 @@ def main(cfg, run, dry_run=False):
             mapparams,
             noise=noise,
             norm_params=norm_params,
+            channel_labels=channel_labels,
         )
         results = {}
-        for src, (cib, tsz) in sources.items():
+        for src, maps in sources.items():
             try:
-                results[src] = stat.compute_or_load(run.stats, src, cib, tsz)
+                results[src] = stat.compute_or_load(run.stats, src, maps)
             except Exception as exc:  # keep going: one bad statistic must not
                 # sink the whole overnight precompute run
                 print(f"[evaluate] {name}/{src} FAILED: {exc!r}")
@@ -1102,7 +1203,9 @@ def main(cfg, run, dry_run=False):
     with open(summary, "w") as f:
         f.write(f"# Evaluation summary — {cfg.run_name}\n\n")
         f.write(
-            f"Sources: {', '.join(f'{s} ({len(c)} maps)' for s, (c, _) in sources.items())}\n\n"
+            "Sources: "
+            + ", ".join(f"{s} ({m.shape[1]} maps)" for s, m in sources.items())
+            + f"\nChannels: {', '.join(channel_labels)}\n\n"
         )
         for line in summary_lines:
             f.write(f"- {line}\n")

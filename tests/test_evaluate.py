@@ -85,10 +85,11 @@ def run(tmp_path):
 
 
 def test_load_sources_split_and_units(cfg, run):
-    sources, norm_params, test_idx = load_sources(cfg, run)
+    sources, norm_params, channel_labels, test_idx = load_sources(cfg, run)
     assert set(sources) == {"agora", "gaussian"}  # no ddpm samples yet
+    assert channel_labels == ["cib", "tsz"]
     assert len(test_idx) == 2
-    cib, tsz = sources["agora"]
+    cib, tsz = sources["agora"]  # (C, N, H, W) unpacks to two (N, H, W) for C=2
     assert cib.shape == (2, RES, RES)
     # denormalised to physical units: mean should sit near cib_mean=20
     assert 10.0 < cib.mean() < 30.0
@@ -100,7 +101,7 @@ def test_load_sources_split_and_units(cfg, run):
 def test_load_sources_picks_up_ddpm_samples(cfg, run):
     run.samples.mkdir(parents=True)
     np.save(run.samples / "samples.npy", np.zeros((4, 2, RES, RES), dtype=np.float32))
-    sources, _, _ = load_sources(cfg, run)
+    sources, _, _, _ = load_sources(cfg, run)
     assert "ddpm" in sources
     cib, tsz = sources["ddpm"]
     assert cib.shape == (4, RES, RES)
@@ -151,14 +152,13 @@ def test_parameter_change_invalidates_cache(cfg, run):
         {"lmin": 300, "lmax": 1500, "binsize": 200, "n_maps": 4}, 1, [RES, RES, 5.625, 5.625]
     )
     rng = np.random.default_rng(0)
-    cib = rng.standard_normal((4, RES, RES))
-    tsz = rng.standard_normal((4, RES, RES))
+    maps = rng.standard_normal((2, 4, RES, RES))  # (C, N, H, W)
     run.stats.mkdir(parents=True)
-    r1 = stat.compute_or_load(run.stats, "agora", cib, tsz)
+    r1 = stat.compute_or_load(run.stats, "agora", maps)
     stat2 = PowerSpectrum(
         {"lmin": 300, "lmax": 1500, "binsize": 100, "n_maps": 4}, 1, [RES, RES, 5.625, 5.625]
     )
-    r2 = stat2.compute_or_load(run.stats, "agora", cib, tsz)
+    r2 = stat2.compute_or_load(run.stats, "agora", maps)
     assert len(r2["el"]) != len(r1["el"])
     # cache now holds the new parameters
     with np.load(stat2.cache_file(run.stats, "agora")) as f:
@@ -178,7 +178,7 @@ def test_pixel_histograms_physical_units():
     rng = np.random.default_rng(3)
     cib = rng.standard_normal((8, RES, RES)) * 3.0 + 20.0
     tsz = rng.standard_normal((8, RES, RES)) * 2.0 - 8.0
-    r = stat.compute(cib, tsz, "agora")
+    r = stat.compute(np.stack([cib, tsz]), "agora")
     for key, centre in [("cib", 20.0), ("tsz", -8.0)]:
         h, bc = r[f"hist_{key}"], r[f"bins_{key}"]
         assert np.all(h >= 0)

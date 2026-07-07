@@ -61,6 +61,9 @@ KNOWN_STATISTICS = {
     },
     "scattering_transforms": {"J", "L", "n_maps", "covariance", "device"},
     "tsz_stacking": {"snr_bins", "cutout_pix", "n_maps"},
+    # 4-channel extension: stack a cross-field on tSZ-SNR-selected clusters
+    "kappa_on_tsz_stacking": {"snr_bins", "cutout_pix", "n_maps"},
+    "ksz_stacking": {"snr_bins", "cutout_pix", "n_maps"},
 }
 
 _RUN_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")

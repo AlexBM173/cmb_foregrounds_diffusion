@@ -917,6 +917,135 @@ class TszStacking(Statistic):
 
 
 # ---------------------------------------------------------------------------
+# Cross-field cluster stacking (4-channel extension): select cluster locations
+# by tSZ SNR, then stack a *different* channel there.
+# ---------------------------------------------------------------------------
+
+
+class _ClusterStack(Statistic):
+    """Stack a target channel on tSZ-SNR-selected cluster locations.
+
+    Peaks are selected from the tSZ map (sign-flipped, since 150 GHz tSZ is a
+    decrement) in SNR bins using the same reference mean/std as ``TszStacking``
+    (injected as ``snr_ref_mean``/``snr_ref_std``), so the SNR depths match
+    across sources and across the stacking statistics. Subclasses set
+    ``target_key`` (channel to stack), an optional ``_target`` transform (e.g.
+    square for kSZ²), and the profile y-axis label ``target_label``.
+    """
+
+    n_field = True
+    select_key = "tsz"
+    target_key = None
+    target_label = ""
+
+    def _target(self, arr):
+        return arr
+
+    @staticmethod
+    def _bin_label(smin, smax):
+        return f"{smin:g}-{smax:g}" if smax is not None else f"gt{smin:g}"
+
+    def _channel(self, key):
+        if key not in self.channel_labels:
+            raise KeyError(f"{self.name} needs the {key!r} channel; run has {self.channel_labels}")
+        return self.channel_labels.index(key)
+
+    def compute(self, maps, source):
+        p = self.params
+        cutout = p["cutout_pix"]
+        dx_arcmin = self.mapparams[2]
+        tsz = maps[self._channel(self.select_key)]
+        target = self._target(maps[self._channel(self.target_key)])
+        # Select on the tSZ map: sign-flip a decrement so clusters are maxima.
+        sign = -1.0 if np.abs(tsz.min()) > np.abs(tsz.max()) else 1.0
+        ref_mean = p.get("snr_ref_mean", tsz.mean())
+        ref_std = p.get("snr_ref_std")
+        sel = sign * (tsz - ref_mean)
+        result = {"sign": np.array(sign), "cutout_pix": np.array(cutout)}
+        half = cutout // 2
+        idx = np.indices((cutout, cutout)).astype(float)
+        xy = ((idx[0] - half) * dx_arcmin / 60.0, (idx[1] - half) * dx_arcmin / 60.0)
+        for smin, smax in p["snr_bins"]:
+            label = self._bin_label(smin, smax)
+            coords = select_snr_pixels(sel, smin, smax, noise=ref_std)
+            cuts = extract_cutouts(target, coords, cutout, max_cutouts=len(coords) or 1)
+            if cuts is None:
+                result[f"n_{label}"] = np.array(0)
+                continue
+            stack = cuts.mean(axis=0)
+            result[f"stack_{label}"] = stack
+            result[f"n_{label}"] = np.array(len(cuts))
+            result[f"profile_{label}"] = radial_profile(
+                stack, xy=xy, bin_size=1.0, minbin=0.0, maxbin=10.0, to_arcmins=1
+            )
+        return result
+
+    def plot(self, results, plot_path):
+        labels = [self._bin_label(smin, smax) for smin, smax in self.params["snr_bins"]]
+        plt, fig, axes = _subplots(len(labels), nrows=2, height=3.4)
+        for col, label in enumerate(labels):
+            ax_img, ax_prof = axes[col], axes[len(labels) + col]
+            agora = results.get("agora", {})
+            if f"stack_{label}" in agora:
+                ax_img.imshow(agora[f"stack_{label}"], cmap="RdBu_r")
+            ax_img.set_title(f"Agora stack, SNR {label}")
+            ax_img.axis("off")
+            for src, r in self._ordered(results):
+                if f"profile_{label}" not in r:
+                    continue
+                prof = r[f"profile_{label}"]
+                ax_prof.errorbar(
+                    prof[:, 0],
+                    prof[:, 1],
+                    yerr=prof[:, 2],
+                    color=SOURCE_COLORS[src],
+                    label=f"{src} (n={int(r[f'n_{label}'])})",
+                    marker=".",
+                )
+            ax_prof.set_xlabel(r"$\theta$ [arcmin]")
+            ax_prof.set_ylabel(self.target_label)
+            ax_prof.legend(fontsize=7)
+        fig.tight_layout()
+        fig.savefig(plot_path, dpi=150)
+        plt.close(fig)
+
+    def summarise(self, results):
+        lines = []
+        for smin, smax in self.params["snr_bins"]:
+            label = self._bin_label(smin, smax)
+            peak = {
+                src: float(r[f"stack_{label}"][r[f"stack_{label}"].shape[0] // 2].max())
+                for src, r in results.items()
+                if f"stack_{label}" in r
+            }
+            counts = {src: int(r[f"n_{label}"]) for src, r in results.items() if f"n_{label}" in r}
+            lines.append(f"{self.name}[{label}]: n={counts}, central peak≈{peak}")
+        return lines
+
+
+class KappaOnTszStacking(_ClusterStack):
+    """CMB-lensing κ stacked on tSZ cluster peaks — the mean cluster
+    convergence profile; a direct test of the κ–tSZ cross-morphology."""
+
+    name = "kappa_on_tsz_stacking"
+    target_key = "kappa"
+    target_label = r"stacked $\kappa$"
+
+
+class KszStacking(_ClusterStack):
+    """kSZ² stacked on tSZ cluster peaks. kSZ is sign-symmetric (random
+    line-of-sight velocity), so the *mean* kSZ vanishes at clusters; the
+    squared field gives the non-zero kSZ power (variance) profile at halos."""
+
+    name = "ksz_stacking"
+    target_key = "ksz"
+    target_label = r"stacked $k_{\mathrm{SZ}}^2\ [\mu\mathrm{K}^2]$"
+
+    def _target(self, arr):
+        return arr**2
+
+
+# ---------------------------------------------------------------------------
 # Peak / minima counts (notebook 10 extension)
 # ---------------------------------------------------------------------------
 
@@ -1119,11 +1248,17 @@ STATISTIC_REGISTRY = {
         MinkowskiFunctionals,
         MinkowskiTensors,
         TszStacking,
+        KappaOnTszStacking,
+        KszStacking,
         PeakCounts,
         MinimaCounts,
         ScatteringTransforms,
     ]
 }
+
+# Statistics that select cluster locations by tSZ SNR — all share the Agora tSZ
+# reference mean/std so the SNR depths are identical across sources and stacks.
+_TSZ_STACKING_STATS = ("tsz_stacking", "kappa_on_tsz_stacking", "ksz_stacking")
 
 
 def main(cfg, run, dry_run=False):
@@ -1154,11 +1289,14 @@ def main(cfg, run, dry_run=False):
     # Report convention: tSZ-stacking SNR bins are defined by the mean and
     # std of the *simulated* (Agora) maps, applied identically to every
     # source. Injected as params so the cache meta keys on the reference.
-    if "tsz_stacking" in stat_names and "agora" in sources:
-        ref_tsz = sources["agora"][1]
-        stack_params = cfg.evaluation.params.setdefault("tsz_stacking", {})
-        stack_params["snr_ref_mean"] = round(float(ref_tsz.mean()), 6)
-        stack_params["snr_ref_std"] = round(float(ref_tsz.std()), 6)
+    stacking_stats = [s for s in stat_names if s in _TSZ_STACKING_STATS]
+    if stacking_stats and "agora" in sources and "tsz" in channel_labels:
+        ref_tsz = sources["agora"][channel_labels.index("tsz")]
+        ref_mean = round(float(ref_tsz.mean()), 6)
+        ref_std = round(float(ref_tsz.std()), 6)
+        for s in stacking_stats:
+            sp = cfg.evaluation.params.setdefault(s, {})
+            sp["snr_ref_mean"], sp["snr_ref_std"] = ref_mean, ref_std
 
     needs_noise = any(
         any(t != "none" for t in cfg.evaluation.params.get(n, {}).get("noise_tiers", []))

@@ -120,6 +120,8 @@ evaluation:
     - minkowski_functionals
     - pixel_histograms
     - tsz_stacking
+    - kappa_on_tsz_stacking   # κ stacked on tSZ cluster peaks (4-channel)
+    - ksz_stacking            # kSZ² stacked on tSZ cluster peaks (4-channel)
 
   power_spectrum:
     lmin: 300
@@ -177,6 +179,14 @@ evaluation:
     tensor_types: [W012]
     n_maps: 120
   tsz_stacking:
+    snr_bins: [[5, 10], [10, 20], [20, null]]
+    cutout_pix: 40
+    n_maps: 200
+  kappa_on_tsz_stacking:      # κ stacked on tSZ-SNR-selected clusters
+    snr_bins: [[5, 10], [10, 20], [20, null]]
+    cutout_pix: 40
+    n_maps: 200
+  ksz_stacking:               # kSZ² stacked on tSZ-SNR-selected clusters
     snr_bins: [[5, 10], [10, 20], [20, null]]
     cutout_pix: 40
     n_maps: 200

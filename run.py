@@ -32,9 +32,9 @@ from pipeline.rundir import RunDir, create_run_dir, git_commit_hash, sha256_of_f
 # v0.2 item; until then a config that asks for anything else must fail loudly
 # rather than silently train a different model than it describes.
 _FIXED_SETTINGS = {
-    "model.dim": (lambda c: c.model.dim, 64),
+    # model.dim is honoured (threaded to train.py/sample.py via --dim).
     "model.dim_mults": (lambda c: list(c.model.dim_mults), [1, 2, 4, 8]),
-    "model.channels": (lambda c: c.model.channels, 2),
+    # model.channels is honoured (2 or 4); enforced in pipeline/train.py.
     "model.flash_attn": (lambda c: c.model.flash_attn, True),
     "model.timesteps": (lambda c: c.model.timesteps, 1000),
     "model.noise_schedule": (lambda c: c.model.noise_schedule, "sigmoid"),
@@ -76,8 +76,8 @@ def _check_fixed_settings(cfg: PipelineConfig) -> None:
         )
 
 
-def _patch_files(cfg: PipelineConfig) -> tuple[Path, Path]:
-    """Return the expected (CIB, tSZ) training patch file paths.
+def _patch_files(cfg: PipelineConfig) -> list[Path]:
+    """Return the expected training patch file paths for all model channels.
 
     Parameters
     ----------
@@ -86,16 +86,21 @@ def _patch_files(cfg: PipelineConfig) -> tuple[Path, Path]:
 
     Returns
     -------
-    tuple of Path
-        Paths of the CIB and tSZ ``.npy`` patch files inside the resolved
-        patches directory, following the notebook 03 naming convention.
+    list of Path
+        Paths of the per-channel ``.npy`` patch files (CIB, tSZ, then kSZ,
+        kappa for a 4-channel run) inside the resolved patches directory,
+        following the notebook 03 / nb03b naming convention. kappa has no
+        frequency tag — lensing convergence is achromatic.
     """
     d = cfg.resolve_patches_dir()
     res, ptsrc = cfg.data.res, int(cfg.preprocessing.point_source_mjy)
-    return (
-        d / f"CIB_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy",
-        d / f"tSZ3_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy",
-    )
+    templates = [
+        "CIB_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy",
+        "tSZ3_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy",
+        "kSZ_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy",
+        "kappa_map_{res}_st6_zscore_{ptsrc}mJy_lp.npy",
+    ]
+    return [d / t.format(res=res, ptsrc=ptsrc) for t in templates[: cfg.model.channels]]
 
 
 def _export_wandb_env(cfg: PipelineConfig, run: RunDir) -> None:
@@ -148,15 +153,20 @@ def stage_preprocess(cfg: PipelineConfig, run: RunDir, dry_run: bool = False) ->
         Print what would happen without touching anything.
     """
     _banner("preprocess", cfg, run)
-    cib, tsz = _patch_files(cfg)
-    if cib.is_file() and tsz.is_file():
-        print(f"[run.py preprocess] training patches present in {cib.parent} — nothing to do")
+    patch_files = _patch_files(cfg)
+    if all(p.is_file() for p in patch_files):
+        print(
+            f"[run.py preprocess] training patches present in {patch_files[0].parent} "
+            "— nothing to do"
+        )
         return
+    missing = ", ".join(p.name for p in patch_files if not p.is_file())
     raise SystemExit(
-        f"[run.py preprocess] no training patches at {cib.parent}.\n"
+        f"[run.py preprocess] missing training patches in {patch_files[0].parent}: {missing}.\n"
         "Scripted preprocessing is not implemented yet — run the tutorial notebooks\n"
-        "01_halo_catalogue → 02_masking → 03_patch_extraction (docs/tutorials/), then\n"
-        "set data.patches_dir in the config to notebook 03's output directory."
+        "01_halo_catalogue → 02_masking → 03_patch_extraction (docs/tutorials/), and for\n"
+        "kSZ/kappa the scripts/vm_preprocessing/nb02b + nb03b chain, then set\n"
+        "data.patches_dir in the config to that output directory."
     )
 
 
@@ -174,10 +184,12 @@ def stage_train(cfg: PipelineConfig, run: RunDir, dry_run: bool = False) -> None
     """
     _check_fixed_settings(cfg)
     _banner("train", cfg, run)
-    cib, tsz = _patch_files(cfg)
-    if not (cib.is_file() and tsz.is_file()):
+    patch_files = _patch_files(cfg)
+    missing = [p for p in patch_files if not p.is_file()]
+    if missing:
+        names = ", ".join(p.name for p in missing)
         raise SystemExit(
-            f"[run.py train] training patches not found in {cib.parent} — "
+            f"[run.py train] training patches not found in {patch_files[0].parent}: {names} — "
             "run `run.py preprocess` first (or set data.patches_dir)."
         )
 
@@ -199,8 +211,12 @@ def stage_train(cfg: PipelineConfig, run: RunDir, dry_run: bool = False) -> None
         str(int(cfg.preprocessing.point_source_mjy)),
         "--res",
         str(cfg.data.res),
+        "--channels",
+        str(cfg.model.channels),
+        "--dim",
+        str(cfg.model.dim),
         "--data-dir",
-        str(cib.parent),
+        str(patch_files[0].parent),
         "--results-dir",
         str(run.checkpoints),
     ]
@@ -262,6 +278,8 @@ def stage_sample(
         str(output),
         "--channels",
         str(cfg.model.channels),
+        "--dim",
+        str(cfg.model.dim),
     ]
     if s.ddim_steps is not None:
         argv += ["--sampling-timesteps", str(s.ddim_steps)]

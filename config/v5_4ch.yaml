@@ -1,0 +1,203 @@
+# =============================================================================
+# foregrounds_diffusion — v5 FOUR-CHANNEL run (CIB + tSZ + kSZ + CMB lensing κ)
+# =============================================================================
+# Post-submission extension of the v4 CIB+tSZ model. Adds the kSZ and raytraced
+# CMB-lensing convergence (κ) channels. Patches are produced by
+# scripts/vm_preprocessing/nb02b_mask_ksz_kappa.py + nb03b_extract_4ch.py (NOT
+# the notebook 03 path), then synced from
+# gs://cmb-diffusion-artifacts-alexbm173/patches/v5_4ch/.
+#
+#     python run.py train  --config config/v5_4ch.yaml
+#     python run.py sample --config config/v5_4ch.yaml
+#
+# NOTE: `run.py evaluate` is NOT yet 4-channel-aware (cross statistics assume the
+# single CIB×tSZ pair; denorm assumes a 2-entry norm_params). Train + sample
+# only for now; the evaluation generalisation is a separate task.
+# =============================================================================
+
+run_name: v5_4ch_zscore_2mJy_a100
+
+output:
+  base_dir: runs
+
+# -----------------------------------------------------------------------------
+# Raw data and patch geometry (notebooks 01–03)
+# -----------------------------------------------------------------------------
+data:
+  cib_map: data/agora_len_mag_cibmap_act_150ghz.fits            # Jy/sr
+  tsz_map: data/agora_ltszNG_bahamas80_bnd_unb_1.0e+12_1.0e+18_lensed.fits  # Compton-y
+  halo_catalogue: data/halo_catalogue/halo_catalogue_m500gt3e14.npz
+  frequency_ghz: 150
+  nside_in: 8192
+  nside_out: 2048
+  patch_deg: 6.0
+  step_deg: 6.0
+  res: 256
+  gal_cut_deg: 20.0
+  pole_cut_deg: 6.0
+  train_size: 0.8
+  val_size: 0.1
+  test_size: 0.1
+  seed: 42
+  # The four-channel patches from nb03b_extract_4ch.py (CIB, tSZ, kSZ, kappa).
+  # On Colab, sync gs://.../patches/v5_4ch/ into this directory before training.
+  # (kSZ/kappa raw-map paths are omitted: the scripted-preprocess stage that
+  # would consume them is not implemented; extraction is the nb02b/nb03b chain.)
+  patches_dir: data/low_pass/2mJy
+
+# -----------------------------------------------------------------------------
+# Preprocessing (notebooks 02–03 / nb02b + nb03b)
+# -----------------------------------------------------------------------------
+preprocessing:
+  lowpass:
+    type: sharp
+    ell_max: 7000
+  normalisation: zscore   # per-channel z-score; norm_params has 8 entries (4 ch)
+  point_source_mjy: 2
+  cluster_mask:
+    enabled: true
+    m500c_min: 3.0e+14
+    theta500_multiplier: 3.0
+  inpainting: gaussian_noise
+  augmentation: true
+
+# -----------------------------------------------------------------------------
+# Model architecture — 4 channels (CIB, tSZ, kSZ, kappa)
+# -----------------------------------------------------------------------------
+model:
+  dim: 96               # bumped from v4's 64 for extra capacity on the 4-field joint
+  dim_mults: [1, 2, 4, 8]
+  channels: 4           # CIB + tSZ + kSZ + CMB-lensing kappa
+  flash_attn: true
+  timesteps: 1000
+  noise_schedule: sigmoid
+  objective: pred_v
+  auto_normalize: false
+
+# -----------------------------------------------------------------------------
+# Training
+# -----------------------------------------------------------------------------
+training:
+  batch_size: 16
+  lr: 1.0e-4
+  lr_scheduler: none
+  warmup_steps: 0
+  train_num_steps: 100000
+  gradient_accumulate_every: 2
+  ema_decay: 0.995
+  mixed_precision: bf16
+  save_and_sample_every: 5000
+  milestone_num_samples: 25
+  resume_from_checkpoint: false   # set true to continue from latest model-*.pt
+  num_gpus: 1
+
+# -----------------------------------------------------------------------------
+# Sampling
+# -----------------------------------------------------------------------------
+sampling:
+  num_samples: 640
+  batch_size: 16
+  ddim_steps: null       # full ancestral DDPM (matches v4)
+  output_format: npy
+  compile: false
+  rescale_cib: null
+  rescale_tsz: null
+
+# -----------------------------------------------------------------------------
+# Evaluation — kept at v4 (2-channel) settings so the config validates; the
+# evaluate stage is NOT yet 4-channel-aware, so do not run it against this model
+# until the cross-statistics / denorm generalisation lands.
+# -----------------------------------------------------------------------------
+evaluation:
+  n_jobs: 8
+  ilc_noise_file: data/ilc/ilc_weights_residuals_agora_fg_model.npy
+  noise_seed: 42
+  statistics:
+    - power_spectrum
+    - cross_spectrum
+    - moments
+    - cross_moments
+    - minkowski_functionals
+    - pixel_histograms
+    - tsz_stacking
+
+  power_spectrum:
+    lmin: 300
+    lmax: 4000
+    binsize: 60
+    n_maps: 500
+  cross_spectrum:
+    lmin: 300
+    lmax: 4000
+    binsize: 60
+    n_maps: 500
+  moments:
+    n_bands: 8
+    lmin: 300
+    lmax: 6060
+    n_maps: 200
+    noise_tiers: [none, s4_deep]
+  cross_moments:
+    n_bands: 8
+    lmin: 300
+    lmax: 6060
+    n_maps: 200
+    noise_tiers: [none, s4_deep]
+  minkowski_functionals:
+    n_thresholds: 50
+    threshold_min: 0.0
+    threshold_max: 1.0
+    n_maps: 200
+  pixel_histograms:
+    n_bins: 1000
+    cib_range: [-3.0, 12.0]
+    tsz_range: [-12.0, 3.0]
+    smooth_sigma: 1.0
+    n_maps: 200
+  peak_counts:
+    smoothing_fwhm_arcmin: [1.0, 2.5, 5.0]
+    threshold_min: -1.0
+    threshold_max: 5.0
+    n_thresholds: 30
+    n_maps: 120
+  minima_counts:
+    smoothing_fwhm_arcmin: [1.0, 2.5, 5.0]
+    threshold_min: -5.0
+    threshold_max: 1.0
+    n_thresholds: 30
+    n_maps: 120
+  scattering_transforms:
+    J: 5
+    L: 4
+    n_maps: 100
+  minkowski_tensors:
+    n_thresholds: 50
+    threshold_min: 0.0
+    threshold_max: 1.0
+    tensor_types: [W012]
+    n_maps: 120
+  tsz_stacking:
+    snr_bins: [[5, 10], [10, 20], [20, null]]
+    cutout_pix: 40
+    n_maps: 200
+
+# -----------------------------------------------------------------------------
+# Weights & Biases
+# -----------------------------------------------------------------------------
+wandb:
+  enabled: false
+  project: cmb_foregrounds_diffusion
+  entity: null
+  tags: []
+
+# -----------------------------------------------------------------------------
+# SLURM (unused — project runs on GCP/Colab)
+# -----------------------------------------------------------------------------
+slurm:
+  partition: ampere
+  qos: null
+  account: null
+  num_gpus: 1
+  mem: 64G
+  time: "12:00:00"
+  mail_user: null

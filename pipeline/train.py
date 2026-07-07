@@ -34,9 +34,10 @@ from tqdm import tqdm
 class WandbTrainer1D(Trainer1D):
     """Trainer1D with optional per-step wandb loss and sample image logging."""
 
-    def __init__(self, *args, use_wandb: bool = False, **kwargs):
+    def __init__(self, *args, use_wandb: bool = False, channel_labels=("cib", "tsz"), **kwargs):
         super().__init__(*args, **kwargs)
         self.use_wandb = use_wandb
+        self.channel_labels = list(channel_labels)
 
     def train(self):
         accelerator = self.accelerator
@@ -98,18 +99,12 @@ class WandbTrainer1D(Trainer1D):
 
                             samples_np = all_samples.cpu().numpy()
                             n_show = min(8, len(samples_np))
-                            wandb.log(
-                                {
-                                    "samples/cib": [
-                                        wandb.Image(samples_np[i, 0]) for i in range(n_show)
-                                    ],
-                                    "samples/tsz": [
-                                        wandb.Image(samples_np[i, 1]) for i in range(n_show)
-                                    ],
-                                    "checkpoint": milestone,
-                                },
-                                step=self.step,
-                            )
+                            log_dict = {"checkpoint": milestone}
+                            for ci, label in enumerate(self.channel_labels):
+                                log_dict[f"samples/{label}"] = [
+                                    wandb.Image(samples_np[i, ci]) for i in range(n_show)
+                                ]
+                            wandb.log(log_dict, step=self.step)
 
                 pbar.update(1)
 
@@ -136,6 +131,25 @@ def augment_images_unique(images):
     return torch.cat([images, r1, r2, r3] + flips, dim=0)
 
 
+CHANNEL_LABELS = ["cib", "tsz", "ksz", "kappa"]
+
+# Per-channel training-patch filenames (notebook 03 / nb03b naming). kappa has
+# no frequency tag — lensing convergence is achromatic.
+_CHANNEL_FILE_TEMPLATES = [
+    "CIB_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy",
+    "tSZ3_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy",
+    "kSZ_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy",
+    "kappa_map_{res}_st6_zscore_{ptsrc}mJy_lp.npy",
+]
+
+
+def _channel_files(res, ptsrc, n_channels):
+    """Return the ordered patch filenames for an *n_channels* run (2 or 4)."""
+    if n_channels not in (2, 4):
+        raise SystemExit(f"--channels must be 2 (CIB+tSZ) or 4 (+kSZ+kappa); got {n_channels}")
+    return [t.format(res=res, ptsrc=ptsrc) for t in _CHANNEL_FILE_TEMPLATES[:n_channels]]
+
+
 def main(argv: list[str] | None = None):
     """Run the training CLI.
 
@@ -159,6 +173,19 @@ def main(argv: list[str] | None = None):
     )
     parser.add_argument(
         "--res", type=int, default=256, help="Map resolution in pixels (default: 256)"
+    )
+    parser.add_argument(
+        "--channels",
+        type=int,
+        default=2,
+        choices=[2, 4],
+        help="Number of map channels: 2 (CIB+tSZ) or 4 (+kSZ+kappa) (default: 2)",
+    )
+    parser.add_argument(
+        "--dim",
+        type=int,
+        default=64,
+        help="Base U-Net channel width (default: 64). Sampling must use the same value.",
     )
     parser.add_argument(
         "--steps", type=int, default=100000, help="Training steps (default: 100000)"
@@ -234,10 +261,18 @@ def main(argv: list[str] | None = None):
     DATA_DIR = (
         Path(args.data_dir) if args.data_dir else Path(f"docs/tutorials/data/low_pass/{PTSRC}mJy")
     )
-    cib_maps = np.load(DATA_DIR / f"CIB_map_150GHz_{RES}_st6_zscore_{PTSRC}mJy_lp.npy")
-    tsz_maps = np.load(DATA_DIR / f"tSZ3_map_150GHz_{RES}_st6_zscore_{PTSRC}mJy_lp.npy")
-    cut_maps = np.concatenate([cib_maps, tsz_maps], axis=-1).transpose(0, 3, 1, 2)
-    print(f"Loaded {len(cut_maps)} patches, shape {cut_maps.shape}")
+    channel_files = _channel_files(RES, PTSRC, args.channels)
+    arrays = []
+    for fname in channel_files:
+        path = DATA_DIR / fname
+        if not path.is_file():
+            parser.error(f"channel patch file not found: {path}")
+        arrays.append(np.load(path))
+    cut_maps = np.concatenate(arrays, axis=-1).transpose(0, 3, 1, 2)
+    print(
+        f"Loaded {len(cut_maps)} patches, shape {cut_maps.shape} "
+        f"({args.channels} channels: {', '.join(CHANNEL_LABELS[: args.channels])})"
+    )
 
     rng = np.random.default_rng(seed=42)
     indices = rng.permutation(len(cut_maps))
@@ -252,7 +287,7 @@ def main(argv: list[str] | None = None):
     # Model
     # -----------------------------------------------------------------------
 
-    model = Unet(dim=64, dim_mults=(1, 2, 4, 8), channels=2, flash_attn=True)
+    model = Unet(dim=args.dim, dim_mults=(1, 2, 4, 8), channels=args.channels, flash_attn=True)
     diffusion = GaussianDiffusion(model, image_size=256, timesteps=1000, auto_normalize=False)
     dataset = Dataset1D(augmented_images)
 
@@ -269,6 +304,7 @@ def main(argv: list[str] | None = None):
         mixed_precision_type="bf16",
         results_folder=str(RESULTS_DIR),
         use_wandb=use_wandb,
+        channel_labels=CHANNEL_LABELS[: args.channels],
     )
 
     # Override dataloader after init with num_workers=0 to prevent hanging
@@ -315,6 +351,8 @@ def main(argv: list[str] | None = None):
         "data_dir": str(DATA_DIR),
         "ptsrc_mJy": PTSRC,
         "resolution": RES,
+        "channels": args.channels,
+        "dim": args.dim,
         "n_train": len(training_images),
         "n_augmented": len(augmented_images),
         "train_steps": args.steps,

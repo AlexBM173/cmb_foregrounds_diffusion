@@ -59,6 +59,7 @@ def build_model(
     channels: int = 2,
     sampling_timesteps: int | None = None,
     auto_normalize: bool = False,
+    dim: int = 64,
 ) -> GaussianDiffusion:
     """Instantiate the U-Net and wrap it in a GaussianDiffusion object.
 
@@ -66,6 +67,9 @@ def build_model(
     ----------
     channels : int
         Number of map channels (default 2: CIB + tSZ).
+    dim : int
+        Base U-Net channel width (default 64). MUST match the value used at
+        training time, or the checkpoint weights will not load.
     sampling_timesteps : int or None
         Number of DDIM reverse steps. ``None`` (default) uses full DDPM
         sampling (1000 steps). Any value < 1000 enables DDIM acceleration;
@@ -84,7 +88,7 @@ def build_model(
         to [-1, 1] during sampling (required for z-score trained models).
     """
     unet = Unet(
-        dim=64,
+        dim=dim,
         dim_mults=(1, 2, 4, 8),
         channels=channels,
         flash_attn=True,
@@ -180,6 +184,12 @@ def main(argv: list[str] | None = None):
         "--channels", type=int, default=2, help="Number of map channels (default: 2 for CIB+tSZ)"
     )
     parser.add_argument(
+        "--dim",
+        type=int,
+        default=64,
+        help="Base U-Net channel width; must match the checkpoint's training value (default: 64)",
+    )
+    parser.add_argument(
         "--sampling-timesteps",
         type=int,
         default=None,
@@ -244,6 +254,7 @@ def main(argv: list[str] | None = None):
                 "batches": args.batches,
                 "batch_size": args.batch_size,
                 "channels": args.channels,
+                "dim": args.dim,
                 "output": args.output,
                 "sampling_timesteps": args.sampling_timesteps or 1000,
                 "rescale_cib": args.rescale_cib or 1.0,
@@ -255,7 +266,9 @@ def main(argv: list[str] | None = None):
     if args.sampling_timesteps is not None:
         print(f"DDIM sampling: {args.sampling_timesteps} steps (DDPM would use 1000)")
     print(f"Loading checkpoint: {args.checkpoint}")
-    diffusion = build_model(channels=args.channels, sampling_timesteps=args.sampling_timesteps)
+    diffusion = build_model(
+        channels=args.channels, sampling_timesteps=args.sampling_timesteps, dim=args.dim
+    )
     diffusion = diffusion.to(accelerator.device)
     diffusion = load_checkpoint(diffusion, args.checkpoint, accelerator)
 

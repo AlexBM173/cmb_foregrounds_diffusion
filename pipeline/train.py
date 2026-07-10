@@ -229,6 +229,21 @@ def main(argv: list[str] | None = None):
         help="Directory for checkpoints and logs (default: results/<run-name>)",
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="RNG seed for the train/test split permutation (default: 42). Must match "
+        "data.seed in the evaluation config, or evaluate will hold out a different "
+        "test set than training used.",
+    )
+    parser.add_argument(
+        "--train-size",
+        type=float,
+        default=0.8,
+        help="Fraction of patches used for training (default: 0.8). Must match "
+        "data.train_size in the evaluation config so the held-out test split lines up.",
+    )
+    parser.add_argument(
         "--wandb",
         action="store_true",
         default=False,
@@ -274,11 +289,17 @@ def main(argv: list[str] | None = None):
         f"({args.channels} channels: {', '.join(CHANNEL_LABELS[: args.channels])})"
     )
 
-    rng = np.random.default_rng(seed=42)
+    # Train/test split. This MUST stay in lock-step with
+    # pipeline.evaluate._test_split_indices, which rebuilds the held-out set from
+    # cfg.data.seed / cfg.data.train_size. run.py passes both through from the
+    # config; the 42 / 0.8 defaults preserve the historical split for the bare CLI.
+    rng = np.random.default_rng(seed=args.seed)
     indices = rng.permutation(len(cut_maps))
-    train_indices = indices[: int(0.8 * len(cut_maps))]
+    train_indices = indices[: int(args.train_size * len(cut_maps))]
     training_images = torch.tensor(cut_maps[train_indices], dtype=torch.float32)
-    print(f"Training set: {len(training_images)} patches")
+    print(
+        f"Training set: {len(training_images)} patches (seed={args.seed}, train_size={args.train_size})"
+    )
 
     augmented_images = augment_images_unique(training_images)
     print(f"After augmentation: {len(augmented_images)} patches")

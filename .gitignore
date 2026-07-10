@@ -2,16 +2,34 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.benchmarks/
 *.prof
 dist/
 build/
 .eggs/
 *.so
 *.pyd
-# PDFs and Windows Zone.Identifier metadata
+# Large binary artefacts — never track these by extension. Runtime assets that
+# genuinely belong in the repo are re-included with ! rules below.
+*.npy
+*.npz
+*.fits
+*.pt
+*.pth
+*.h5
+*.hdf5
+*.pkl
+*.ckpt
+# ILC residual-noise weights (23 MB) — required at runtime by every eval config
+# as `ilc_noise_file`; the profiling npz baselines are tiny and worth keeping.
+!data/ilc/ilc_weights_residuals_agora_fg_model.npy
+!results/profiling/*.npz
+# PDFs and Windows Zone.Identifier metadata. The catch-all matches both the
+# ASCII-colon and fullwidth-colon (U+FF1A) variants WSL produces.
 *.pdf
-*.pdf:Zone.Identifier
-*.fits:Zone.Identifier
+*Zone.Identifier
 # Nested git repos (used locally; not submodules)
 scattering_transform/
 # Generated plot outputs

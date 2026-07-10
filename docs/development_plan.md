@@ -486,9 +486,9 @@ is now authoritative.
 
 **`test_morphology.py`**
 - `_eigendecompose_2x2`: identity matrix gives β=1, θ=0; known anisotropic tensor gives correct β
-- `_tensor_W012`: all-ones binary map gives isotropic tensor (β≈1)
+- `_tensor_W021`: all-ones binary map gives isotropic tensor (β≈1)
 - `_tensor_W200`: circular excursion set gives β≈1
-- `compute_minkowski_tensors`: shape `{'W012': {'beta': (N,T), 'theta': (N,T)}}`; β ∈ [0,1]
+- `compute_minkowski_tensors`: shape `{'W021': {'beta': (N,T), 'theta': (N,T)}}`; β ∈ [0,1]
 - `compute_mfs` (requires `quantimpy`): marked `pytest.mark.optional`; returns tuple `(M0, M1, M2)` each shape `(N, T)` (M0 ≡ V0 area fraction, M1 ≡ V1 perimeter, M2 ≡ V2 Euler characteristic — same quantities, different naming convention); assert M0 decreasing with threshold
 
 **`test_stacking.py`**
@@ -601,7 +601,7 @@ Priority is proportional to call frequency in the evaluation pipeline.
 **`morphology.py`**
 - `compute_mfs(maps_nhw, norm_fn, thresholds)` — loops N × T; calls `quantimpy`
 - `compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, tensor_types)` — loops N × T × 3 types; expected bottleneck
-- `_tensor_W012(binary_map)` — inner kernel; called N × T × 1 times
+- `_tensor_W021(binary_map)` — inner kernel; called N × T × 1 times
 - `_tensor_W200(binary_map)` — same
 - `_tensor_W201(binary_map)` — same
 
@@ -643,7 +643,7 @@ time and peak memory. Use log-spaced values to reveal power-law scaling.
 | `compute_summed_moments` | O(N · B · HW log HW) | O(B · HW) |
 | `compute_cross_moments` | O(N · B · HW log HW) | O(B · HW) |
 | `compute_minkowski_tensors` | O(N · T · HW) | O(N · T · HW) if vectorised |
-| `_tensor_W012` | O(HW) | O(HW) |
+| `_tensor_W021` | O(HW) | O(HW) |
 | `select_snr_pixels` | O(N · HW) | O(HW) |
 | `smooth_map` | O(N · HW) | O(HW) |
 
@@ -773,7 +773,7 @@ For the single most expensive function, embed the `line_profiler` table
 from line_profiler import LineProfiler
 lp = LineProfiler()
 lp.add_function(compute_minkowski_tensors)
-lp.add_function(_tensor_W012)
+lp.add_function(_tensor_W021)
 lp.enable_by_count()
 compute_minkowski_tensors(...)
 lp.disable_by_count()
@@ -815,7 +815,7 @@ at every commit, not just during initial optimisation.
 
 **a) Numba JIT — candidate pending profiling**
 
-**Important constraint:** the true bottleneck in `_tensor_W012` and `_tensor_W201`
+**Important constraint:** the true bottleneck in `_tensor_W021` and `_tensor_W201`
 is `scipy.ndimage.binary_erosion` and `scipy.ndimage.sobel` — both are pre-compiled
 C/Fortran and cannot run inside a Numba `nopython=True` kernel. Only the
 normal-vector accumulation loop (after the scipy calls return) is JIT-eligible.
@@ -830,7 +830,7 @@ import numba
 
 @numba.jit(nopython=True, cache=True)
 def _accumulate_normals(bx, by):
-    """Accumulate W012 tensor from boundary normal components."""
+    """Accumulate W021 tensor from boundary normal components."""
     W = np.zeros((2, 2))
     for i in range(len(bx)):
         nx, ny = bx[i], by[i]
@@ -1673,7 +1673,7 @@ def run_statistics(cib, tsz, mapparams, bp_edges, n_jobs):
     # Minkowski tensors
     mt = compute_minkowski_tensors(
         tsz, lambda x: x, THRESHOLDS,
-        tensor_types=['W012'], n_jobs=n_jobs
+        tensor_types=['W021'], n_jobs=n_jobs
     )
 
     # Peak / minima counts
@@ -1687,7 +1687,7 @@ def run_statistics(cib, tsz, mapparams, bp_edges, n_jobs):
         cl_tsz=cl_tsz,     cl_tsz_std=cl_tsz_std,
         cl_cross=cl_cross, cl_cross_std=cl_cross_std,
         moments=moments_out, moment_labels=np.array(labels),
-        mt_beta=mt['W012']['beta'],
+        mt_beta=mt['W021']['beta'],
         pk=pk,
     )
 

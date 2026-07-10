@@ -37,7 +37,7 @@ def test_default_config_valid():
     assert cfg.model.dim_mults == [1, 2, 4, 8]
     assert cfg.model.auto_normalize is False
     assert "power_spectrum" in cfg.evaluation.statistics
-    assert cfg.evaluation.params["tsz_stacking"]["cutout_pix"] == 40
+    assert cfg.evaluation.params["tsz_stacking"]["cutout_pix"] == 22
 
 
 def test_missing_file():

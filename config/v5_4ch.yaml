@@ -7,12 +7,9 @@
 # the notebook 03 path), then synced from
 # gs://cmb-diffusion-artifacts-alexbm173/patches/v5_4ch/.
 #
-#     python run.py train  --config config/v5_4ch.yaml
-#     python run.py sample --config config/v5_4ch.yaml
-#
-# NOTE: `run.py evaluate` is NOT yet 4-channel-aware (cross statistics assume the
-# single CIB×tSZ pair; denorm assumes a 2-entry norm_params). Train + sample
-# only for now; the evaluation generalisation is a separate task.
+#     python run.py train    --config config/v5_4ch.yaml
+#     python run.py sample   --config config/v5_4ch.yaml
+#     python run.py evaluate --config config/v5_4ch.yaml
 # =============================================================================
 
 run_name: v5_4ch_zscore_2mJy_a100
@@ -36,8 +33,8 @@ data:
   gal_cut_deg: 20.0
   pole_cut_deg: 6.0
   train_size: 0.8
-  val_size: 0.1
-  test_size: 0.1
+  val_size: 0.0   # paper convention: two-way 80/20 split, no separate validation set
+  test_size: 0.2
   seed: 42
   # The four-channel patches from nb03b_extract_4ch.py (CIB, tSZ, kSZ, kappa).
   # On Colab, sync gs://.../patches/v5_4ch/ into this directory before training.
@@ -104,9 +101,11 @@ sampling:
   rescale_tsz: null
 
 # -----------------------------------------------------------------------------
-# Evaluation — kept at v4 (2-channel) settings so the config validates; the
-# evaluate stage is NOT yet 4-channel-aware, so do not run it against this model
-# until the cross-statistics / denorm generalisation lands.
+# Evaluation — 4-channel. Autos/histograms/peaks/minima/MFs run over all C=4
+# channels; cross_spectrum covers the 6 field pairs; moments use a summed
+# temperature field (CIB+tSZ+kSZ) with κ kept separate, plus 72 cross-moments.
+# minkowski_tensors and scattering_transforms remain 2-field (CIB×tSZ) and are
+# therefore left out of `statistics` below.
 # -----------------------------------------------------------------------------
 evaluation:
   n_jobs: 8
@@ -122,6 +121,8 @@ evaluation:
     - tsz_stacking
     - kappa_on_tsz_stacking   # κ stacked on tSZ cluster peaks (4-channel)
     - ksz_stacking            # kSZ² stacked on tSZ cluster peaks (4-channel)
+    - peak_counts             # per-field peak counts, all 4 channels (n_field)
+    - minima_counts           # per-field minima counts, all 4 channels (n_field)
 
   power_spectrum:
     lmin: 300
@@ -152,8 +153,14 @@ evaluation:
     n_maps: 200
   pixel_histograms:
     n_bins: 1000
-    cib_range: [-3.0, 12.0]
-    tsz_range: [-12.0, 3.0]
+    # Physical units: load_sources denormalises every source (µK for CIB/tSZ/kSZ,
+    # dimensionless for κ) before histogramming. Bounds are round numbers that
+    # cover the AGORA distribution; revisit once v5 DDPM samples exist in case
+    # their tails run wider (v4 samples were wider than AGORA).
+    cib_range: [0.0, 100.0]     # physical µK (matches v4/report)
+    tsz_range: [-100.0, 0.0]    # physical µK; tSZ decrements negative
+    ksz_range: [-20.0, 20.0]    # physical µK; signed kSZ, symmetric
+    kappa_range: [-0.4, 0.6]    # dimensionless convergence, positive-skew
     smooth_sigma: 1.0
     n_maps: 200
   peak_counts:
@@ -176,19 +183,23 @@ evaluation:
     n_thresholds: 50
     threshold_min: 0.0
     threshold_max: 1.0
-    tensor_types: [W012]
+    tensor_types: [W021]
     n_maps: 120
+  # All three stacks select clusters on the tSZ map. run_evaluate injects
+  # snr_ref_mean/snr_ref_std from the Agora maps, so the same absolute SNR
+  # threshold applies to agora, ddpm and gaussian alike — do NOT set them here,
+  # the injection overwrites any config value.
   tsz_stacking:
     snr_bins: [[5, 10], [10, 20], [20, null]]
-    cutout_pix: 40
+    cutout_pix: 22              # 22 px x 1.40625' = 30.9' — matches Prabhu et al. (report's 31'x31')
     n_maps: 200
   kappa_on_tsz_stacking:      # κ stacked on tSZ-SNR-selected clusters
     snr_bins: [[5, 10], [10, 20], [20, null]]
-    cutout_pix: 40
+    cutout_pix: 22              # 22 px x 1.40625' = 30.9' — matches Prabhu et al. (report's 31'x31')
     n_maps: 200
   ksz_stacking:               # kSZ² stacked on tSZ-SNR-selected clusters
     snr_bins: [[5, 10], [10, 20], [20, null]]
-    cutout_pix: 40
+    cutout_pix: 22              # 22 px x 1.40625' = 30.9' — matches Prabhu et al. (report's 31'x31')
     n_maps: 200
 
 # -----------------------------------------------------------------------------

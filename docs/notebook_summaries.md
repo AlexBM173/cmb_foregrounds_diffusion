@@ -217,11 +217,11 @@ Wraps scattering transform backends to compute S1/S2 scattering coefficients and
 
 Computes rank-2 Minkowski tensors for CIB and tSZ patches and compares anisotropy between Agora, DDPM, and Gaussian baseline. For each intensity threshold ν the map is binarised to the excursion set K = {x : T(x) > ν} and three tensor types are computed, each eigendecomposed to give β = λ_min/λ_max ∈ [0, 1] (anisotropy index; 1 = isotropic) and θ (major-axis orientation). All three tensor types are run so their different sensitivities can be compared before committing to a specific choice:
 
-- **W012** (W^{0,2}_1): boundary normal tensor via Sobel-estimated outward normals n⊗n. Probes isotropy of cluster boundary shapes. Recommended default.
+- **W021** (W^{0,2}_1): boundary normal tensor via Sobel-estimated outward normals n⊗n. Probes isotropy of cluster boundary shapes. Recommended default.
 - **W200** (W^{2,0}_0): area inertia tensor r⊗r over interior pixels. Measures elongation of filled excursion regions.
 - **W201** (W^{2,0}_1): boundary position tensor r⊗r over boundary pixels. Hybrid sensitivity.
 
-Plots: (1) β(ν) 2×3 grid (rows = CIB/tSZ, cols = tensor type) with mean ± std bands; (2) polar θ histograms at ν = 0.2, 0.5, 0.8 using W012 — a uniform distribution is the Gaussian sanity check; (3) W012 residuals (β_Agora − β_DDPM)/σ_Agora with 1σ reference lines. Outputs `plots/minkowski_tensors_beta.pdf`, `plots/minkowski_tensors_theta.pdf`, `plots/minkowski_tensors_residuals.pdf`.
+Plots: (1) β(ν) 2×3 grid (rows = CIB/tSZ, cols = tensor type) with mean ± std bands; (2) polar θ histograms at ν = 0.2, 0.5, 0.8 using W021 — a uniform distribution is the Gaussian sanity check; (3) W021 residuals (β_Agora − β_DDPM)/σ_Agora with 1σ reference lines. Outputs `plots/minkowski_tensors_beta.pdf`, `plots/minkowski_tensors_theta.pdf`, `plots/minkowski_tensors_residuals.pdf`.
 
 **Paper relation:** No direct paper section — Minkowski tensors are a post-paper extension. They generalise the scalar Minkowski functionals in Figure 6 (§4.5) by adding directional information, exposing morphological anisotropy that MFs miss.
 
@@ -285,9 +285,9 @@ Minkowski functionals and tensors.
 | Function / object | Description |
 |---|---|
 | `compute_mfs(maps_nhw, norm_fn, thresholds)` | Minkowski functionals M0/M1/M2 via `quantimpy`. Returns three `(N, T)` arrays. |
-| `compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, tensor_types=('W012',), centred=True)` | Eigendecomposes each Minkowski tensor at each threshold. Returns dict keyed by tensor type → `{'beta': (N,T), 'theta': (N,T)}`. |
+| `compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, tensor_types=('W021',), centred=True)` | Eigendecomposes each Minkowski tensor at each threshold. Returns dict keyed by tensor type → `{'beta': (N,T), 'theta': (N,T)}`. |
 | `MINKOWSKI_TENSOR_DESCRIPTIONS` | Dict of human-readable descriptions keyed by tensor type string. |
-| `_tensor_W012(binary_map)` | W^{0,2}_1: Σ n⊗n over boundary pixels (Sobel normals). |
+| `_tensor_W021(binary_map)` | W^{0,2}_1: Σ n⊗n over boundary pixels (Sobel normals). |
 | `_tensor_W200(binary_map, centred=True)` | W^{2,0}_0: Σ r⊗r over interior pixels. |
 | `_tensor_W201(binary_map, centred=True)` | W^{2,0}_1: Σ r⊗r over boundary pixels. |
 | `_eigendecompose_2x2(W)` | Returns β = λ_min/λ_max and θ (major axis, wrapped to (-π/2, π/2]). |

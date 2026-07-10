@@ -17,7 +17,7 @@ from pipeline.evaluate import (
 from pipeline.rundir import RunDir
 
 RES = 64
-N_PATCHES = 20  # -> 16 train / 2 val / 2 test with the 80/10/10 split
+N_PATCHES = 20  # -> 16 train, 4 held out for evaluation (val+test of the 80/10/10 split)
 
 
 @pytest.fixture
@@ -88,13 +88,14 @@ def test_load_sources_split_and_units(cfg, run):
     sources, norm_params, channel_labels, test_idx = load_sources(cfg, run)
     assert set(sources) == {"agora", "gaussian"}  # no ddpm samples yet
     assert channel_labels == ["cib", "tsz"]
-    assert len(test_idx) == 2
+    assert len(test_idx) == 4
     cib, tsz = sources["agora"]  # (C, N, H, W) unpacks to two (N, H, W) for C=2
-    assert cib.shape == (2, RES, RES)
+    assert cib.shape == (4, RES, RES)
     # denormalised to physical units: mean should sit near cib_mean=20
     assert 10.0 < cib.mean() < 30.0
-    # split must match pipeline/train.py's permutation
-    expected = np.random.default_rng(seed=42).permutation(N_PATCHES)[18:]
+    # every patch train.py withheld: it trains on indices[:int(0.8*n)] and never
+    # splits off a validation set, so val+test together are the held-out set
+    expected = np.random.default_rng(seed=42).permutation(N_PATCHES)[16:]
     np.testing.assert_array_equal(test_idx, expected)
 
 
@@ -123,19 +124,27 @@ def test_noise_model_deterministic(ilc_file):
 
 
 def test_main_end_to_end_and_caching(cfg, run, capsys):
+    from pipeline.evaluate import STATISTIC_REGISTRY
+
     main(cfg, run)
     for stat in cfg.evaluation.statistics:
         for src in ["agora", "gaussian"]:
             f = run.stats / f"{stat}__{src}.npz"
             assert f.exists(), f"missing cache {f}"
-        assert (run.plots / f"{stat}.png").exists()
+        # figures are tagged with the run's field count; cluster-stacking
+        # statistics share two combined grid figures instead of one each
+        if getattr(STATISTIC_REGISTRY[stat], "grid_plot", False):
+            assert (run.plots / "2f_stacking_profiles.png").exists()
+            assert (run.plots / "2f_stacking_maps.png").exists()
+        else:
+            assert (run.plots / f"2f_{stat}.png").exists()
     assert (run.stats / "test_split.npz").exists()
     assert (run.stats / "summary.md").exists()
 
     # noise tiers present in the moments cache
     with np.load(run.stats / "moments__agora.npz") as f:
         assert "summed_none" in f.files and "summed_spt3g" in f.files
-        assert f["summed_none"].shape == (2, 2, 3)  # (N_test, bands, [S2,S3,S4])
+        assert f["summed_none"].shape == (4, 2, 3)  # (N_test, bands, [S2,S3,S4])
         assert not np.allclose(f["summed_none"], f["summed_spt3g"])
 
     # second run must hit every cache

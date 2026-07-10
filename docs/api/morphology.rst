@@ -31,8 +31,8 @@ Requires ``pip install quantimpy``:
 :func:`compute_minkowski_tensors` is a tensorial extension that additionally
 captures anisotropy and orientation per excursion set.  It returns the
 anisotropy index β = λ_min / λ_max ∈ [0, 1] (β = 1 is perfectly isotropic)
-and major-axis orientation θ for three tensor types (W012, W200, W201).
-W012 (boundary normal tensor) is recommended as the default:
+and major-axis orientation θ for three tensor types (W021, W200, W201).
+W021 (boundary normal tensor) is recommended as the default:
 
 .. code-block:: python
 
@@ -40,10 +40,10 @@ W012 (boundary normal tensor) is recommended as the default:
 
     results = compute_minkowski_tensors(
         maps_nhw, apply_maxmin_normalization, thresholds,
-        tensor_types=["W012"], centred=True,
+        tensor_types=["W021"], centred=True,
     )
-    beta = results["W012"]["beta"]   # (N, len(thresholds))
-    theta = results["W012"]["theta"]
+    beta = results["W021"]["beta"]   # (N, len(thresholds))
+    theta = results["W021"]["theta"]
 
 See :doc:`../tutorials/12_minkowski_tensors` for β(ν) curves, polar
 orientation histograms, and DDPM/AGORA residuals.

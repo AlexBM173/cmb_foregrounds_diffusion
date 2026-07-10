@@ -24,7 +24,7 @@ the *anisotropy* and *orientation* of morphological features.
 β = λ_min / λ_max ∈ [0, 1] (β = 1 is perfectly isotropic) and the
 major-axis orientation θ per map per threshold, for three tensor types:
 
-- **W012**: boundary normal tensor via Sobel-estimated outward normals n⊗n.
+- **W021**: boundary normal tensor via Sobel-estimated outward normals n⊗n.
   Probes isotropy of cluster boundary shapes.  Recommended default.
 - **W200**: area inertia tensor r⊗r over interior pixels.
   Measures elongation of filled excursion regions.
@@ -95,7 +95,7 @@ def compute_mfs(maps_nhw, norm_fn, thresholds, n_jobs=1):
 # ---------------------------------------------------------------------------
 
 
-def _tensor_W012(binary_map):
+def _tensor_W021(binary_map):
     """W^{0,2}_1 — interface normal tensor.
 
     Sums the outer product n⊗n of the outward unit normal n over all
@@ -137,7 +137,7 @@ def _tensor_W201(binary_map, centred=True):
     """W^{2,0}_1 — boundary position tensor.
 
     Sums the outer product r⊗r of pixel position vectors r over boundary
-    pixels only.  Hybrid between W012 and W200: position-weighted boundary
+    pixels only.  Hybrid between W021 and W200: position-weighted boundary
     measure.
     """
     interior = binary_erosion(binary_map, border_value=0)
@@ -151,13 +151,13 @@ def _tensor_W201(binary_map, centred=True):
 
 
 _TENSOR_FUNCTIONS = {
-    "W012": _tensor_W012,
+    "W021": _tensor_W021,
     "W200": _tensor_W200,
     "W201": _tensor_W201,
 }
 
 MINKOWSKI_TENSOR_DESCRIPTIONS = {
-    "W012": (
+    "W021": (
         "W^{0,2}_1 — interface normal tensor: sums n⊗n over boundary pixels "
         "(Sobel-estimated outward normals). Probes isotropy of cluster boundary "
         "shapes; recommended default."
@@ -169,7 +169,7 @@ MINKOWSKI_TENSOR_DESCRIPTIONS = {
     "W201": (
         "W^{2,0}_1 — boundary position tensor: sums r⊗r over boundary pixels. "
         "Hybrid: position-weighted boundary measure, intermediate sensitivity "
-        "between W012 and W200."
+        "between W021 and W200."
     ),
 }
 
@@ -204,7 +204,7 @@ def _eigendecompose_2x2(W):
 
 
 def compute_minkowski_tensors(
-    maps_nhw, norm_fn, thresholds, tensor_types=("W012",), centred=True, n_jobs=1
+    maps_nhw, norm_fn, thresholds, tensor_types=("W021",), centred=True, n_jobs=1
 ):
     """Compute Minkowski tensor anisotropy indices across intensity thresholds.
 
@@ -226,7 +226,7 @@ def compute_minkowski_tensors(
     tensor_types : tuple of str
         Which tensor(s) to compute.  Any subset of:
 
-        ``'W012'``
+        ``'W021'``
             W^{0,2}_1 — interface normal tensor (default).  Boundary normals
             n⊗n via Sobel gradients.  Most sensitive to boundary shape.
         ``'W200'``
@@ -234,7 +234,7 @@ def compute_minkowski_tensors(
             Measures elongation of filled regions.
         ``'W201'``
             W^{2,0}_1 — boundary position tensor.  Boundary pixel positions
-            r⊗r.  Hybrid between W012 and W200.
+            r⊗r.  Hybrid between W021 and W200.
     centred : bool
         If True (default), subtract the excursion-set centroid from position
         vectors before forming the tensor.  Affects W200 and W201 only.
@@ -263,9 +263,9 @@ def compute_minkowski_tensors(
     >>> thresholds = np.linspace(0.05, 0.95, 50)
     >>> results = compute_minkowski_tensors(
     ...     maps, apply_maxmin_normalization, thresholds,
-    ...     tensor_types=('W012', 'W200'))
-    >>> beta_W012 = results['W012']['beta']   # shape (N, 50)
-    >>> theta_W012 = results['W012']['theta'] # shape (N, 50)
+    ...     tensor_types=('W021', 'W200'))
+    >>> beta_W021 = results['W021']['beta']   # shape (N, 50)
+    >>> theta_W021 = results['W021']['theta'] # shape (N, 50)
     """
     thresholds = np.asarray(thresholds)
     N, T = len(maps_nhw), len(thresholds)

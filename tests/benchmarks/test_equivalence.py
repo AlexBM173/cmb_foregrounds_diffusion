@@ -90,9 +90,9 @@ def test_minkowski_tensors_vectorised_threshold_unchanged(patch_stack):
     """The §2.6b vectorised threshold loop produces identical beta/theta."""
     thresholds = np.linspace(-2, 2, 15)
     result = compute_minkowski_tensors(patch_stack, lambda x: x, thresholds)
-    assert result["W012"]["beta"].shape == (len(patch_stack), len(thresholds))
-    assert np.all(result["W012"]["beta"] >= 0.0)
-    assert np.all(result["W012"]["beta"] <= 1.0)
+    assert result["W021"]["beta"].shape == (len(patch_stack), len(thresholds))
+    assert np.all(result["W021"]["beta"] >= 0.0)
+    assert np.all(result["W021"]["beta"] <= 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +119,8 @@ def test_compute_minkowski_tensors_n_jobs_2_matches_serial(patch_stack):
     ref = compute_minkowski_tensors(patch_stack, lambda x: x, thresholds, n_jobs=1)
     par = compute_minkowski_tensors(patch_stack, lambda x: x, thresholds, n_jobs=2)
 
-    np.testing.assert_allclose(ref["W012"]["beta"], par["W012"]["beta"], rtol=1e-12)
-    np.testing.assert_allclose(ref["W012"]["theta"], par["W012"]["theta"], rtol=1e-12)
+    np.testing.assert_allclose(ref["W021"]["beta"], par["W021"]["beta"], rtol=1e-12)
+    np.testing.assert_allclose(ref["W021"]["theta"], par["W021"]["theta"], rtol=1e-12)
 
 
 # ---------------------------------------------------------------------------

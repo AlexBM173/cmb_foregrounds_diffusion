@@ -163,11 +163,11 @@ evaluation:
     n_maps: 200
   pixel_histograms:      # notebook 08
     n_bins: 1000
-    # Histograms are computed in z-score units (all sources share the same
-    # norm_params transform). CIB is positively skewed; tSZ has a negative
-    # (decrement) tail at 150 GHz.
-    cib_range: [-3.0, 12.0]
-    tsz_range: [-12.0, 3.0]
+    # Histograms are computed in PHYSICAL units: load_sources denormalises every
+    # source via norm_params before histogramming. CIB is positively skewed; tSZ
+    # has a negative (decrement) tail at 150 GHz.
+    cib_range: [0.0, 100.0]     # physical µK
+    tsz_range: [-100.0, 0.0]    # physical µK; tSZ decrements negative
     smooth_sigma: 1.0    # Gaussian smoothing at PLOT time only (bins)
     n_maps: 200
   peak_counts:           # notebook 10 (extension)
@@ -190,11 +190,11 @@ evaluation:
     n_thresholds: 50
     threshold_min: 0.0
     threshold_max: 1.0
-    tensor_types: [W012] # W012 | W200 | W201 (see morphology.py)
+    tensor_types: [W021] # W021 | W200 | W201 (see morphology.py)
     n_maps: 120
   tsz_stacking:          # notebook 09
     snr_bins: [[5, 10], [10, 20], [20, null]]   # null = no upper bound
-    cutout_pix: 40       # 40 px ≈ 56′ at 1.40625′/px
+    cutout_pix: 22       # 22 px ≈ 31′ at 1.40625′/px — matches Prabhu et al.
     n_maps: 200
 
 # -----------------------------------------------------------------------------

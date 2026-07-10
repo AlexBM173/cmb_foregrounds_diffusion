@@ -44,7 +44,16 @@ KNOWN_STATISTICS = {
         "tensor_types",
         "n_maps",
     },
-    "pixel_histograms": {"n_bins", "cib_range", "tsz_range", "smooth_sigma", "n_maps"},
+    # One <label>_range per channel, for the labels in pipeline.train.CHANNEL_LABELS.
+    "pixel_histograms": {
+        "n_bins",
+        "cib_range",
+        "tsz_range",
+        "ksz_range",
+        "kappa_range",
+        "smooth_sigma",
+        "n_maps",
+    },
     "peak_counts": {
         "smoothing_fwhm_arcmin",
         "threshold_min",
@@ -60,6 +69,8 @@ KNOWN_STATISTICS = {
         "n_maps",
     },
     "scattering_transforms": {"J", "L", "n_maps", "covariance", "device"},
+    # snr_ref_mean/snr_ref_std are injected by run_evaluate from the Agora maps,
+    # not set by the user, so they are deliberately absent from these key sets.
     "tsz_stacking": {"snr_bins", "cutout_pix", "n_maps"},
     # 4-channel extension: stack a cross-field on tSZ-SNR-selected clusters
     "kappa_on_tsz_stacking": {"snr_bins", "cutout_pix", "n_maps"},

@@ -53,7 +53,7 @@ one-sentence takeaway.
    does).
 7. **Peaks/minima** — per-map σ convention (shape-only statistic, blind to
    amplitude by construction — say so); describe residuals from the plot.
-8. **Minkowski tensors** — max β residual 0.64σ (CIB, W012, ν=0.33); all
+8. **Minkowski tensors** — max β residual 0.64σ (CIB, W021, ν=0.33); all
    channels/tensors ≤ 0.64σ; r(ν) within ±0.7σ everywhere while the Gaussian
    baseline reaches ≈4σ (tSZ W200/W201 low ν); DDPM reproduces the θ≈0
    orientation peak the Gaussian lacks.

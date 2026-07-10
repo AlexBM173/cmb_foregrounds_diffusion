@@ -3,7 +3,7 @@ import pytest
 
 from foregrounds_diffusion.morphology import (
     _eigendecompose_2x2,
-    _tensor_W012,
+    _tensor_W021,
     _tensor_W200,
     compute_minkowski_tensors,
 )
@@ -27,28 +27,28 @@ def test_eigendecompose_anisotropic_tensor():
 
 
 def test_eigendecompose_beta_in_unit_interval(binary_map):
-    from foregrounds_diffusion.morphology import _tensor_W012
+    from foregrounds_diffusion.morphology import _tensor_W021
 
-    W = _tensor_W012(binary_map)
+    W = _tensor_W021(binary_map)
     beta, _ = _eigendecompose_2x2(W)
     assert 0.0 <= beta <= 1.0
 
 
 # ---------------------------------------------------------------------------
-# _tensor_W012
+# _tensor_W021
 # ---------------------------------------------------------------------------
 
 
-def test_tensor_W012_all_ones_approximately_isotropic():
+def test_tensor_W021_all_ones_approximately_isotropic():
     # Square boundary → β close to 1
     binary = np.ones((64, 64), dtype=bool)
-    W = _tensor_W012(binary)
+    W = _tensor_W021(binary)
     beta, _ = _eigendecompose_2x2(W)
     assert beta > 0.9
 
 
-def test_tensor_W012_returns_2x2(binary_map):
-    W = _tensor_W012(binary_map)
+def test_tensor_W021_returns_2x2(binary_map):
+    W = _tensor_W021(binary_map)
     assert W.shape == (2, 2)
 
 
@@ -84,15 +84,15 @@ def test_compute_minkowski_tensors_shape(patch_stack):
     thresholds = np.linspace(-2, 2, 10)
     result = compute_minkowski_tensors(patch_stack, lambda x: x, thresholds)
     N, T = len(patch_stack), len(thresholds)
-    assert "W012" in result
-    assert result["W012"]["beta"].shape == (N, T)
-    assert result["W012"]["theta"].shape == (N, T)
+    assert "W021" in result
+    assert result["W021"]["beta"].shape == (N, T)
+    assert result["W021"]["theta"].shape == (N, T)
 
 
 def test_compute_minkowski_tensors_beta_in_unit_interval(patch_stack):
     thresholds = np.linspace(-2, 2, 10)
     result = compute_minkowski_tensors(patch_stack, lambda x: x, thresholds)
-    beta = result["W012"]["beta"]
+    beta = result["W021"]["beta"]
     assert np.all(beta >= 0.0)
     assert np.all(beta <= 1.0)
 
@@ -103,9 +103,9 @@ def test_compute_minkowski_tensors_multiple_types(patch_stack):
         patch_stack,
         lambda x: x,
         thresholds,
-        tensor_types=("W012", "W200", "W201"),
+        tensor_types=("W021", "W200", "W201"),
     )
-    for key in ("W012", "W200", "W201"):
+    for key in ("W021", "W200", "W201"):
         assert key in result
         assert result[key]["beta"].shape == (len(patch_stack), len(thresholds))
 

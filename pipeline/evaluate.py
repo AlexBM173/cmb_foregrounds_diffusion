@@ -40,8 +40,49 @@ from foregrounds_diffusion.peak_counts import count_minima_binned, count_peaks_b
 from foregrounds_diffusion.preprocessing import apply_maxmin_normalization
 from foregrounds_diffusion.stacking import extract_cutouts, select_snr_pixels
 
-SOURCE_COLORS = {"agora": "black", "ddpm": "steelblue", "gaussian": "orangered"}
+# Validated colourblind-safe (Okabe-Ito blue/vermillion + Tol wine).  Worst
+# separation over ALL THREE pairs and every CVD type is ΔE 31 (floor 12):
+# Agora↔DDPM 92 (protan), Agora↔Gaussian 32 (protan), DDPM↔Gaussian 67 (deutan).
+# A green Gaussian fell to ΔE 17 against Agora under tritanopia.  Line style is a
+# redundant (non-colour) encoding of the same identity.
+SOURCE_COLORS = {"agora": "#0072B2", "ddpm": "#D55E00", "gaussian": "#882255"}
+SOURCE_LINESTYLES = {"agora": "-", "ddpm": "--", "gaussian": ":"}
+SOURCE_LABELS = {"agora": "Agora", "ddpm": "DDPM", "gaussian": "Gaussian"}
 SOURCE_ORDER = ["agora", "ddpm", "gaussian"]
+
+PANEL_FACECOLOR = "white"
+GRID_COLOR = "#c9c9c4"
+
+
+def _src_label(src):
+    """Display name for a source: 'Agora', 'DDPM', 'Gaussian'."""
+    return SOURCE_LABELS.get(src, src)
+
+
+def _line_kw(src):
+    """Colour + linestyle identity for one source (colour is never the only cue)."""
+    return {"color": SOURCE_COLORS[src], "ls": SOURCE_LINESTYLES[src]}
+
+
+def _apply_style():
+    """Serif text, LaTeX-style mathtext — applied to every figure."""
+    import matplotlib
+
+    matplotlib.rcParams.update(
+        {
+            "font.family": "serif",
+            "font.serif": ["DejaVu Serif"],
+            "mathtext.fontset": "dejavuserif",
+            "axes.facecolor": PANEL_FACECOLOR,
+            "axes.edgecolor": "#55555a",
+            "axes.titlesize": 11,
+            "axes.labelsize": 10,
+            "figure.facecolor": "white",
+            "legend.framealpha": 0.9,
+            "legend.fontsize": 8,
+        }
+    )
+
 
 # Per-channel metadata, ordered; sliced to the run's channel count
 # (cfg.model.channels). Fields: (key, display label, base unit for axis labels,
@@ -54,10 +95,19 @@ CHANNEL_META = [
     ("kappa", r"$\kappa$", "", "kappa_map_{res}_st6_zscore_{ptsrc}mJy_lp.npy"),
 ]
 _CHANNEL_BY_KEY = {m[0]: m for m in CHANNEL_META}
+# Canonical plotting order: CIB, tSZ, kSZ, kappa. Anything that draws one panel
+# (row, column, curve) per channel follows this, regardless of registry or
+# config ordering.
+CHANNEL_ORDER = [m[0] for m in CHANNEL_META]
 
 
 def _channel_display(key):
     return _CHANNEL_BY_KEY[key][1]
+
+
+def _field_prefix(n_channels):
+    """Figure-filename prefix identifying the run's field count: '2f_', '4f_'."""
+    return f"{n_channels}f_"
 
 
 def _to_dl(el, arr):
@@ -69,9 +119,38 @@ def _dl_ylabel(base_i, base_j):
     """LaTeX D_ell y-axis label from two channels' base units ('uK' or '')."""
     n_uk = (base_i == "uK") + (base_j == "uK")
     if n_uk == 0:
-        return r"$\mathcal{D}_\ell$"
+        return r"$\mathcal{D}_\ell$ [dimensionless]"
     unit = r"\mu\mathrm{K}^2" if n_uk == 2 else r"\mu\mathrm{K}"
     return rf"$\mathcal{{D}}_\ell\ [{unit}]$"
+
+
+def _grid(ax, zero=False, minor=False):
+    """Faint reference gridlines; ``zero`` emphasises the y=0 line so the
+    Gaussian zero-consistency checks (odd/standardised moments) are easy to read."""
+    ax.set_facecolor(PANEL_FACECOLOR)
+    ax.grid(True, which="major", color=GRID_COLOR, lw=0.6, alpha=0.9)
+    if minor:
+        ax.grid(True, which="minor", color=GRID_COLOR, lw=0.3, alpha=0.5)
+    ax.set_axisbelow(True)
+    if zero:
+        ax.axhline(0.0, color="#55555a", lw=0.9, ls="--", zorder=1)
+
+
+def _legend(ax, **kw):
+    """Legend with the canonical source display names already applied."""
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(handles, labels, **kw)
+
+
+def _summed_moment_tex(label):
+    """'S2' -> '$S_2$' (standardised summed-field moment notation, report §7)."""
+    return rf"$S_{{{label[1:]}}}$"
+
+
+def _cross_moment_tex(label):
+    """'S2aa' -> '$M_2^{aa}$', 'S3aab' -> '$M_3^{aab}$' (raw cross-moment notation)."""
+    return rf"$M_{{{label[1]}}}^{{{label[2:]}}}$"
 
 
 def _mapparams(cfg):
@@ -87,11 +166,18 @@ def _mapparams(cfg):
 
 
 def _test_split_indices(n, cfg):
-    """Test-set indices of the seeded permutation used by pipeline/train.py."""
+    """Indices of every patch withheld from training, in train.py's permutation.
+
+    ``pipeline/train.py`` trains on ``indices[:int(train_size * n)]`` and never
+    carves out a validation set, so the whole remainder — ``val_size`` and
+    ``test_size`` together — is unseen by the model and usable for evaluation.
+    Starting at ``train_size + val_size`` would discard the ``val_size`` share
+    of held-out maps for no benefit (for 701 patches: 71 maps instead of 141),
+    needlessly inflating the Agora sample variance.
+    """
     rng = np.random.default_rng(seed=cfg.data.seed)
     indices = rng.permutation(n)
-    start = int((cfg.data.train_size + cfg.data.val_size) * n)
-    return indices[start:]
+    return indices[int(cfg.data.train_size * n) :]
 
 
 def load_sources(cfg, run):
@@ -286,10 +372,52 @@ def _subplots(ncols, nrows=1, width=4.6, height=3.8):
     import matplotlib
 
     matplotlib.use("Agg")
+    _apply_style()
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(nrows, ncols, figsize=(width * ncols, height * nrows))
     return plt, fig, np.atleast_1d(axes).ravel()
+
+
+def _finish(fig, plot_path, suptitle=None, tight=True):
+    """Common figure close-out: suptitle, layout, save, close.
+
+    A figure with a single titled panel gets ONE heading, not a title above a
+    near-identical subtitle: the panel title is folded into the suptitle.
+
+    ``tight=False`` for figures already using matplotlib's constrained layout.
+    """
+    import matplotlib.pyplot as plt
+
+    if suptitle:
+        titled = [ax for ax in fig.axes if ax.get_visible() and ax.get_title()]
+        if len(titled) == 1:
+            suptitle = f"{suptitle} — {titled[0].get_title()}"
+            titled[0].set_title("")
+        fig.suptitle(suptitle, fontsize=13)
+    if tight:
+        fig.tight_layout()
+    fig.savefig(plot_path, dpi=150)
+    plt.close(fig)
+
+
+def _trim_ylim(ax, values, log=False, pad=0.06):
+    """Set y-limits from the data actually drawn, so panels waste no space."""
+    v = np.concatenate([np.asarray(a, dtype=float).ravel() for a in values if np.size(a)])
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return
+    if log:
+        v = v[v > 0]
+        if v.size == 0:
+            return
+        lo, hi = np.log10(v.min()), np.log10(v.max())
+        span = max(hi - lo, 0.15)
+        ax.set_ylim(10 ** (lo - pad * span), 10 ** (hi + pad * span))
+    else:
+        lo, hi = v.min(), v.max()
+        span = max(hi - lo, abs(hi) * 1e-3 or 1e-12)
+        ax.set_ylim(lo - pad * span, hi + pad * span)
 
 
 # ---------------------------------------------------------------------------
@@ -314,35 +442,54 @@ class PowerSpectrum(Statistic):
         return result
 
     def plot(self, results, plot_path):
+        """Log-log auto-spectra, each with its own residual box beneath
+        (Prabhu et al. figure convention)."""
+        import matplotlib
+
+        matplotlib.use("Agg")
+        _apply_style()
+        import matplotlib.pyplot as plt
+
         keys = self.channel_labels
-        plt, fig, axes = _subplots(len(keys) + 1)
-        for ax, key in zip(axes[: len(keys)], keys):
+        fig = plt.figure(figsize=(4.8 * len(keys), 5.2), layout="constrained")
+        gs = fig.add_gridspec(2, len(keys), height_ratios=[3, 1], hspace=0.05)
+        for col, key in enumerate(keys):
             base = _CHANNEL_BY_KEY[key][2]
+            ax = fig.add_subplot(gs[0, col])
+            ax_r = fig.add_subplot(gs[1, col], sharex=ax)
+            drawn = []
             for src, r in self._ordered(results):
                 el = r["el"]
                 dl, derr = _to_dl(el, r[f"cl_{key}"]), _to_dl(el, r[f"err_{key}"])
-                ax.plot(el, dl, color=SOURCE_COLORS[src], label=src)
-                ax.fill_between(el, dl - derr, dl + derr, color=SOURCE_COLORS[src], alpha=0.2, lw=0)
+                ax.plot(el, dl, label=_src_label(src), lw=1.6, **_line_kw(src))
+                ax.fill_between(
+                    el, dl - derr, dl + derr, color=SOURCE_COLORS[src], alpha=0.18, lw=0
+                )
+                drawn += [dl - derr, dl + derr]
             ax.set_xscale("log")
-            ax.set_yscale("log")
-            ax.set_xlabel(r"$\ell$")
+            # linear y: D_ell spans well under a decade per channel, and a log
+            # axis cannot show the bands where they cross zero
+            _trim_ylim(ax, drawn)
             ax.set_ylabel(_dl_ylabel(base, base))
             ax.set_title(_channel_display(key))
-            ax.legend()
-        ax = axes[len(keys)]
-        ax.axhline(0, color="k", lw=0.8, ls="--")
-        if "agora" in results and "ddpm" in results:
-            a, d = results["agora"], results["ddpm"]
-            for key in keys:
+            _grid(ax, minor=True)
+            ax.tick_params(labelbottom=False)
+            if col == 0:
+                _legend(ax)
+
+            # residual box: (Agora - DDPM) / sigma_Agora. Already in units of
+            # sigma, so no sigma bands are drawn — the gridlines carry the scale.
+            if "agora" in results and "ddpm" in results:
+                a, d = results["agora"], results["ddpm"]
                 resid = (a[f"cl_{key}"] - d[f"cl_{key}"]) / (a[f"err_{key}"] + 1e-30)
-                ax.plot(a["el"], resid, label=_channel_display(key))
-            ax.legend()
-        ax.set_xlabel(r"$\ell$")
-        ax.set_ylabel(r"$(C_\ell^{\mathrm{Agora}} - C_\ell^{\mathrm{DDPM}})/\sigma$")
-        ax.set_title("residuals")
-        fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
-        plt.close(fig)
+                ax_r.plot(a["el"], resid, color=SOURCE_COLORS["ddpm"], lw=1.3)
+                lim = max(1.0, 1.15 * float(np.abs(resid).max()))
+                ax_r.set_ylim(-lim, lim)
+            ax_r.set_xscale("log")
+            _grid(ax_r, zero=True, minor=True)
+            ax_r.set_xlabel(r"$\ell$")
+            ax_r.set_ylabel(r"$\Delta_\ell / \sigma$")
+        _finish(fig, plot_path, r"Auto-power spectra $\mathcal{D}_\ell$", tight=False)
 
     def summarise(self, results):
         lines = []
@@ -386,33 +533,59 @@ class CrossSpectrum(Statistic):
         return result
 
     def plot(self, results, plot_path):
+        """Cross-spectra, each with its own residual box beneath — same panel
+        layout as the auto-spectra."""
+        import matplotlib
+
+        matplotlib.use("Agg")
+        _apply_style()
+        import matplotlib.pyplot as plt
+
         keys = self.channel_labels
         pairs = self._pairs()
         ncols = min(3, len(pairs))
         nrows = int(np.ceil(len(pairs) / ncols))
-        plt, fig, axes = _subplots(ncols, nrows=nrows)
+        fig = plt.figure(figsize=(4.8 * ncols, 5.2 * nrows), layout="constrained")
+        # two gridspec rows per panel row: the spectrum (3) over its residual (1)
+        gs = fig.add_gridspec(2 * nrows, ncols, height_ratios=[3, 1] * nrows, hspace=0.05)
         for idx, (i, j) in enumerate(pairs):
-            ax = axes[idx]
+            row, col = divmod(idx, ncols)
             ki, kj = keys[i], keys[j]
             base_i, base_j = _CHANNEL_BY_KEY[ki][2], _CHANNEL_BY_KEY[kj][2]
+            ax = fig.add_subplot(gs[2 * row, col])
+            ax_r = fig.add_subplot(gs[2 * row + 1, col], sharex=ax)
+            drawn = []
             for src, r in self._ordered(results):
                 el = r["el"]
                 dl = _to_dl(el, r[f"cl_{ki}_{kj}"])
                 derr = _to_dl(el, r[f"err_{ki}_{kj}"])
-                ax.plot(el, dl, color=SOURCE_COLORS[src], label=src)
-                ax.fill_between(el, dl - derr, dl + derr, color=SOURCE_COLORS[src], alpha=0.2, lw=0)
+                ax.plot(el, dl, label=_src_label(src), lw=1.6, **_line_kw(src))
+                ax.fill_between(
+                    el, dl - derr, dl + derr, color=SOURCE_COLORS[src], alpha=0.18, lw=0
+                )
+                drawn += [dl - derr, dl + derr]
             ax.set_xscale("log")
-            ax.set_yscale("symlog")
-            ax.set_xlabel(r"$\ell$")
+            # linear y: cross-spectra change sign, so no log axis can hold them
+            _trim_ylim(ax, drawn)
             ax.set_ylabel(_dl_ylabel(base_i, base_j))
             ax.set_title(f"{_channel_display(ki)} $\\times$ {_channel_display(kj)}")
+            _grid(ax, zero=True, minor=True)
+            ax.tick_params(labelbottom=False)
             if idx == 0:
-                ax.legend()
-        for k in range(len(pairs), len(axes)):
-            axes[k].axis("off")
-        fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
-        plt.close(fig)
+                _legend(ax)
+
+            # residual box: (Agora - DDPM) / sigma_Agora, as for the auto-spectra
+            if "agora" in results and "ddpm" in results:
+                a, d = results["agora"], results["ddpm"]
+                resid = (a[f"cl_{ki}_{kj}"] - d[f"cl_{ki}_{kj}"]) / (a[f"err_{ki}_{kj}"] + 1e-30)
+                ax_r.plot(a["el"], resid, color=SOURCE_COLORS["ddpm"], lw=1.3)
+                lim = max(1.0, 1.15 * float(np.abs(resid).max()))
+                ax_r.set_ylim(-lim, lim)
+            ax_r.set_xscale("log")
+            _grid(ax_r, zero=True, minor=True)
+            ax_r.set_xlabel(r"$\ell$")
+            ax_r.set_ylabel(r"$\Delta_\ell / \sigma$")
+        _finish(fig, plot_path, r"Cross-power spectra $\mathcal{D}_\ell^{\,ab}$", tight=False)
 
     def summarise(self, results):
         lines = []
@@ -534,12 +707,16 @@ class Moments(Statistic):
 
     def plot(self, results, plot_path):
         labels = self._labels()
-        vtier = self._variance_tier()
         rows = self._row_specs()
         plt, fig, axes = _subplots(len(labels), nrows=len(rows))
         axes = np.atleast_1d(axes).reshape(len(rows), len(labels))
         for r_i, (base_key, row_title) in enumerate(rows):
             noiseless = base_key != self.prefix
+            row_base = (
+                "uK"
+                if base_key == self.prefix
+                else _CHANNEL_BY_KEY[base_key.replace("field_", "")][2]
+            )
             for m_i, label in enumerate(labels):
                 ax = axes[r_i, m_i]
                 for src, r in self._ordered(results):
@@ -550,23 +727,27 @@ class Moments(Statistic):
                         r["band_centers"],
                         mean,
                         yerr=err,
-                        color=SOURCE_COLORS[src],
-                        label=src,
+                        label=_src_label(src),
                         marker=".",
-                        ls="-",
                         capsize=2,
+                        lw=1.4,
+                        **_line_kw(src),
                     )
-                if m_i == 0:
+                # S2 = variance (carries units); S3/S4 are standardised, hence
+                # dimensionless, and -> 0 for a Gaussian (zero reference line)
+                is_variance = m_i == 0
+                _grid(ax, zero=not is_variance, minor=is_variance)
+                if is_variance:
                     ax.set_yscale("log")
-                if r_i == len(rows) - 1:
-                    ax.set_xlabel(r"$\ell$ band centre")
-                tier_note = "noiseless" if noiseless else f"err: {vtier}"
-                ax.set_title(f"{row_title} {label} ({tier_note})")
+                    unit = r" [$\mu$K$^2$]" if row_base == "uK" else " [dimensionless]"
+                else:
+                    unit = " [dimensionless]"
+                ax.set_title(_summed_moment_tex(label) + unit)
+                ax.set_ylabel(f"{row_title}\n{_summed_moment_tex(label)}")
+                ax.set_xlabel(r"$\ell$")
                 if r_i == 0 and m_i == 0:
-                    ax.legend()
-        fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
-        plt.close(fig)
+                    _legend(ax)
+        _finish(fig, plot_path, "Band-power moments")
 
 
 class CrossMoments(Moments):
@@ -644,8 +825,19 @@ class CrossMoments(Moments):
             var_key = mean_key
         return r[mean_key][:, :, m_i].mean(axis=0), r[var_key][:, :, m_i].std(axis=0)
 
+    @staticmethod
+    def _cross_unit(label, base_a, base_b):
+        r"""µK exponent of a raw cross-moment: one power per field occurrence
+        in the superscript, counting only the fields carrying µK units."""
+        suffix = label[2:]
+        n = suffix.count("a") * (base_a == "uK") + suffix.count("b") * (base_b == "uK")
+        if n == 0:
+            return " [dimensionless]"
+        return rf" [$\mu$K$^{{{n}}}$]" if n > 1 else r" [$\mu$K]"
+
     def plot(self, results, plot_path):
         ki, kj = self._primary_pair()
+        base_a, base_b = _CHANNEL_BY_KEY[ki][2], _CHANNEL_BY_KEY[kj][2]
         labels = self._labels()
         plt, fig, axes = _subplots(4, nrows=3)
         for m_i, label in enumerate(labels):
@@ -658,24 +850,26 @@ class CrossMoments(Moments):
                     r["band_centers"],
                     mean,
                     yerr=err,
-                    color=SOURCE_COLORS[src],
-                    label=src,
+                    label=_src_label(src),
                     marker=".",
-                    ls="-",
                     capsize=2,
+                    lw=1.4,
+                    **_line_kw(src),
                 )
-            ax.set_title(label)
-            if m_i >= 8:
-                ax.set_xlabel(r"$\ell$ band centre")
+            # raw moments: odd orders -> 0 for a Gaussian (zero check); even
+            # orders sit at the non-zero Wick (disconnected) baseline
+            ax.set_title(_cross_moment_tex(label) + self._cross_unit(label, base_a, base_b))
+            ax.set_ylabel(_cross_moment_tex(label))
+            _grid(ax, zero=True)
+            ax.set_xlabel(r"$\ell$")
             if m_i == 0:
-                ax.legend()
-        fig.suptitle(
-            f"cross-moments: {_channel_display(ki)} $\\times$ {_channel_display(kj)} "
-            f"(all {len(self._pairs())} pairs cached)"
+                _legend(ax)
+        _finish(
+            fig,
+            plot_path,
+            f"Cross-moments $M_p^{{ab}}$  ($a = ${_channel_display(ki)},"
+            f"  $b = ${_channel_display(kj)})",
         )
-        fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
-        plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -727,16 +921,28 @@ class PixelHistograms(Statistic):
                 ax.plot(
                     r[f"bins_{key}"],
                     gaussian_filter1d(r[f"hist_{key}"], sigma=sigma),
-                    color=SOURCE_COLORS[src],
-                    label=src,
+                    label=_src_label(src),
+                    lw=1.6,
+                    **_line_kw(src),
                 )
+            # trim only the truly-empty ends, keeping the full non-Gaussian
+            # tail: widest support across the physical sources (Agora + DDPM)
+            # down to ~1e-6 of the peak density
+            srcs = [s for s in ("agora", "ddpm") if s in results] or list(results)
+            b = results[srcs[0]][f"bins_{key}"]
+            dens = np.maximum.reduce([results[s][f"hist_{key}"] for s in srcs])
+            support = np.where(dens > dens.max() * 1e-6)[0]
+            if support.size:
+                lo = b[max(int(support[0]) - 1, 0)]
+                hi = b[min(int(support[-1]) + 1, len(b) - 1)]
+                ax.set_xlim(lo, hi)
             ax.set_yscale("log")
+            _grid(ax, minor=True)
+            ax.set_title(_channel_display(key))
             ax.set_xlabel(f"{_channel_display(key)} pixel value{unit}")
-            ax.set_ylabel("PDF")
-            ax.legend()
-        fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
-        plt.close(fig)
+            ax.set_ylabel("PDF [1/pixel value]" if unit else "PDF [dimensionless]")
+            _legend(ax)
+        _finish(fig, plot_path, "Pixel-intensity distributions")
 
 
 class MinkowskiFunctionals(Statistic):
@@ -760,28 +966,29 @@ class MinkowskiFunctionals(Statistic):
         keys = self.channel_labels
         plt, fig, axes = _subplots(len(keys), nrows=3)
         axes = np.atleast_1d(axes).reshape(3, len(keys))
+        # V_k(nu) with the threshold argument written out: distinguishes the
+        # Minkowski functionals from the M_p N-point moments of the same name.
+        # nu here runs over the MIN-MAX normalised map (compute() passes
+        # apply_maxmin_normalization), so it is NOT the f/sigma of the peak counts.
+        units = [r" [pixel$^2$]", " [pixel]", " [dimensionless]"]  # area, perimeter, Euler
         for row, mf in enumerate(["M0", "M1", "M2"]):
+            v_tex = rf"$V_{row}(\nu)$"
             for col, key in enumerate(keys):
                 ax = axes[row, col]
                 for src, r in self._ordered(results):
                     arr = r[f"{mf}_{key}"]
-                    ax.plot(r["thresholds"], arr.mean(axis=0), color=SOURCE_COLORS[src], label=src)
+                    m, s = arr.mean(axis=0), arr.std(axis=0)
+                    ax.plot(r["thresholds"], m, label=_src_label(src), lw=1.6, **_line_kw(src))
                     ax.fill_between(
-                        r["thresholds"],
-                        arr.mean(axis=0) - arr.std(axis=0),
-                        arr.mean(axis=0) + arr.std(axis=0),
-                        color=SOURCE_COLORS[src],
-                        alpha=0.2,
-                        lw=0,
+                        r["thresholds"], m - s, m + s, color=SOURCE_COLORS[src], alpha=0.18, lw=0
                     )
-                ax.set_title(f"{mf} — {_channel_display(key)}")
-                if row == 2:
-                    ax.set_xlabel(r"threshold $\nu$")
+                ax.set_title(f"{v_tex} — {_channel_display(key)}")
+                ax.set_ylabel(v_tex + units[row])
+                _grid(ax, zero=(row == 2))
+                ax.set_xlabel(r"threshold $\nu$ [min--max normalised]")
                 if row == 0 and col == 0:
-                    ax.legend()
-        fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
-        plt.close(fig)
+                    _legend(ax)
+        _finish(fig, plot_path, r"Minkowski functionals $V_k(\nu)$")
 
 
 class MinkowskiTensors(Statistic):
@@ -794,7 +1001,7 @@ class MinkowskiTensors(Statistic):
 
         p = self.params
         thresholds = np.linspace(p["threshold_min"], p["threshold_max"], p["n_thresholds"])
-        tensor_types = tuple(p.get("tensor_types", ["W012"]))
+        tensor_types = tuple(p.get("tensor_types", ["W021"]))
         result = {"thresholds": thresholds}
         for key, maps in [("cib", cib), ("tsz", tsz)]:
             tensors = compute_minkowski_tensors(
@@ -813,93 +1020,104 @@ class MinkowskiTensors(Statistic):
     # (report §Summary statistics: ν = 0.2, 0.5, 0.8)
     THETA_NUS = (0.2, 0.5, 0.8)
     # tensor whose orientation/residuals the report singles out
-    PRIMARY_TENSOR = "W012"
+    PRIMARY_TENSOR = "W021"
 
     def plot(self, results, plot_path):
-        tensor_types = list(self.params.get("tensor_types", ["W012"]))
-        primary = self.PRIMARY_TENSOR if self.PRIMARY_TENSOR in tensor_types else tensor_types[0]
-        ncols = max(len(tensor_types), len(self.THETA_NUS))
-        plt, fig, axes = _subplots(ncols, nrows=5, height=3.2)
-        axes = axes.reshape(5, ncols)
-        for ax in axes.ravel():
-            ax.axis("off")
+        """Two figures: ``minkowski_tensors.png`` (β̄ anisotropy, each panel
+        with its own residual box) and ``*_orientation.png`` (θ distributions).
+        The single combined grid of all three was too busy."""
+        import matplotlib
 
-        # rows 0-1: β̄(ν) per tensor type
-        for row, key in enumerate(["cib", "tsz"]):
+        matplotlib.use("Agg")
+        _apply_style()
+        import matplotlib.pyplot as plt
+
+        tensor_types = list(self.params.get("tensor_types", ["W021"]))
+        primary = self.PRIMARY_TENSOR if self.PRIMARY_TENSOR in tensor_types else tensor_types[0]
+
+        def _sibling(suffix):
+            return plot_path.with_name(f"{plot_path.stem}_{suffix}{plot_path.suffix}")
+
+        # --- figure 1: β̄(ν) with residual boxes, field × tensor type ---------
+        keys = ["cib", "tsz"]
+        ncols = len(tensor_types)
+        fig = plt.figure(figsize=(4.8 * ncols, 5.2 * len(keys)), layout="constrained")
+        # two gridspec rows per field: the β̄ curve (3) over its residual (1)
+        gs = fig.add_gridspec(2 * len(keys), ncols, height_ratios=[3, 1] * len(keys), hspace=0.05)
+        for row, key in enumerate(keys):
             for col, ttype in enumerate(tensor_types):
-                ax = axes[row, col]
-                ax.axis("on")
+                ax = fig.add_subplot(gs[2 * row, col])
+                ax_r = fig.add_subplot(gs[2 * row + 1, col], sharex=ax)
                 for src, r in self._ordered(results):
                     arr = r[f"beta_{key}_{ttype}"]
-                    ax.plot(r["thresholds"], arr.mean(axis=0), color=SOURCE_COLORS[src], label=src)
+                    m, s = arr.mean(axis=0), arr.std(axis=0)
+                    ax.plot(r["thresholds"], m, label=_src_label(src), lw=1.5, **_line_kw(src))
                     ax.fill_between(
-                        r["thresholds"],
-                        arr.mean(axis=0) - arr.std(axis=0),
-                        arr.mean(axis=0) + arr.std(axis=0),
-                        color=SOURCE_COLORS[src],
-                        alpha=0.2,
-                        lw=0,
+                        r["thresholds"], m - s, m + s, color=SOURCE_COLORS[src], alpha=0.2, lw=0
                     )
                 ax.set_ylim(0, 1)
-                ax.set_title(f"β — {key.upper()} ({ttype})")
+                _grid(ax)
+                ax.set_title(rf"$\bar\beta(\nu)$ — {_channel_display(key)} ({ttype})")
+                ax.set_ylabel(r"$\bar\beta(\nu)$ [dimensionless]")
+                ax.tick_params(labelbottom=False)
                 if row == 0 and col == 0:
-                    ax.legend()
+                    _legend(ax)
 
-        # rows 2-3: orientation θ distributions for the primary tensor at the
-        # representative thresholds (report: ν = 0.2, 0.5, 0.8)
+                # residual box: r(ν) = (beta_Agora - beta_src) / sigma_Agora.
+                # Already in units of sigma, so no sigma bands are drawn. Both
+                # non-Agora sources appear (the standalone residual figure this
+                # replaces showed both); colour + linestyle carry the identity.
+                lim = 1.0
+                if "agora" in results:
+                    a = results["agora"][f"beta_{key}_{ttype}"]
+                    for src in ["ddpm", "gaussian"]:
+                        if src not in results:
+                            continue
+                        d = results[src][f"beta_{key}_{ttype}"]
+                        r_nu = (a.mean(axis=0) - d.mean(axis=0)) / (a.std(axis=0) + 1e-30)
+                        ax_r.plot(results["agora"]["thresholds"], r_nu, lw=1.3, **_line_kw(src))
+                        lim = max(lim, 1.15 * float(np.abs(r_nu).max()))
+                ax_r.set_ylim(-lim, lim)
+                _grid(ax_r, zero=True)
+                ax_r.set_xlabel(r"threshold $\nu$")
+                ax_r.set_ylabel(r"$r(\nu)$")
+        _finish(fig, plot_path, r"Minkowski tensor anisotropy $\bar\beta(\nu)$", tight=False)
+
+        # --- figure 2: orientation θ distributions (-> *_orientation.png) ---
         theta_bins = np.linspace(-np.pi / 2, np.pi / 2, 25)
         centers = 0.5 * (theta_bins[:-1] + theta_bins[1:])
+        plt, fig, axes = _subplots(len(self.THETA_NUS), nrows=2, height=3.4)
+        axes = np.atleast_1d(axes).reshape(2, len(self.THETA_NUS))
         for row, key in enumerate(["cib", "tsz"]):
             for col, nu in enumerate(self.THETA_NUS):
-                ax = axes[2 + row, col]
-                ax.axis("on")
+                ax = axes[row, col]
                 for src, r in self._ordered(results):
                     t_i = int(np.argmin(np.abs(r["thresholds"] - nu)))
                     hist, _ = np.histogram(
                         r[f"theta_{key}_{primary}"][:, t_i], bins=theta_bins, density=True
                     )
-                    ax.step(centers, hist, where="mid", color=SOURCE_COLORS[src], label=src)
-                # isotropic reference: uniform on (−π/2, π/2]
-                ax.axhline(1 / np.pi, color="grey", lw=0.8, ls=":")
-                ax.set_title(rf"θ — {key.upper()} ({primary}, ν={nu:g})")
-                if row == 1:
-                    ax.set_xlabel(r"major-axis orientation θ [rad]")
-
-        # row 4: pointwise residual curves r(ν) = (β̄_Agora − β̄_x)/σ_Agora
-        for col, ttype in enumerate(tensor_types):
-            ax = axes[4, col]
-            ax.axis("on")
-            if "agora" in results:
-                a_r = results["agora"]
-                for src in ["ddpm", "gaussian"]:
-                    if src not in results:
-                        continue
-                    for key, ls in [("cib", "-"), ("tsz", "--")]:
-                        a = a_r[f"beta_{key}_{ttype}"]
-                        d = results[src][f"beta_{key}_{ttype}"]
-                        r_nu = (a.mean(axis=0) - d.mean(axis=0)) / (a.std(axis=0) + 1e-30)
-                        ax.plot(
-                            a_r["thresholds"],
-                            r_nu,
-                            color=SOURCE_COLORS[src],
-                            ls=ls,
-                            label=f"{src} {key.upper()}",
-                        )
-            ax.axhline(0, color="k", lw=0.8)
-            ax.set_title(f"r(ν) — {ttype}")
-            ax.set_xlabel(r"threshold $\nu$")
-            ax.set_ylabel(r"$(\bar\beta_{\rm Agora} - \bar\beta)/\sigma_{\rm Agora}$")
-            if col == 0:
-                ax.legend(fontsize=7)
-        fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
-        plt.close(fig)
+                    ax.step(
+                        centers,
+                        hist,
+                        where="mid",
+                        color=SOURCE_COLORS[src],
+                        ls=SOURCE_LINESTYLES[src],
+                        label=_src_label(src),
+                    )
+                ax.axhline(1 / np.pi, color="grey", lw=0.8, ls=":")  # isotropic ref
+                _grid(ax)
+                ax.set_title(rf"$\theta$ — {_channel_display(key)} ({primary}, $\nu = {nu:g}$)")
+                ax.set_ylabel(r"PDF [1/rad]")
+                ax.set_xlabel(r"major-axis orientation $\theta$ [rad]")
+                if row == 0 and col == 0:
+                    _legend(ax)
+        _finish(fig, _sibling("orientation"), r"Minkowski tensor major-axis orientation $\theta$")
 
     def summarise(self, results):
         # report eq: r(ν) = (β̄_Agora − β̄_DDPM) / σ_Agora, quoted at max |r|
         lines = []
         if "agora" in results and "ddpm" in results:
-            for ttype in self.params.get("tensor_types", ["W012"]):
+            for ttype in self.params.get("tensor_types", ["W021"]):
                 for key in ["cib", "tsz"]:
                     a = results["agora"][f"beta_{key}_{ttype}"]
                     d = results["ddpm"][f"beta_{key}_{ttype}"]
@@ -915,6 +1133,33 @@ class MinkowskiTensors(Statistic):
 # ---------------------------------------------------------------------------
 # tSZ stacking (notebook 09)
 # ---------------------------------------------------------------------------
+
+
+def _peaks_per_map(results, label):
+    """Stacked-peak counts normalised by each source's map count.
+
+    Sources are evaluated over different numbers of maps (Agora is limited to
+    the test split, the DDPM to ``n_maps`` samples), so raw counts are not
+    comparable between them — a source with more maps looks like it has more
+    clusters.  Raw ``n`` is kept alongside the rate for traceability.
+    """
+    rates = {}
+    for src, r in results.items():
+        if f"n_{label}" not in r:
+            continue
+        n = int(r[f"n_{label}"])
+        n_maps = int(r["n_maps"]) if "n_maps" in r else 0
+        rates[src] = f"{n / n_maps:.2f} ({n})" if n_maps else f"? ({n})"
+    return rates
+
+
+def _peak_rate_legend(src, r, label):
+    """Legend entry quoting peaks *per map* only — raw counts are not comparable
+    between sources evaluated over different numbers of maps."""
+    n = int(r[f"n_{label}"])
+    if "n_maps" not in r:
+        return _src_label(src)
+    return f"{_src_label(src)} ({n / int(r['n_maps']):.2f}/map)"
 
 
 class TszStacking(Statistic):
@@ -934,6 +1179,10 @@ class TszStacking(Statistic):
     """
 
     name = "tsz_stacking"
+    grid_plot = True  # drawn by _plot_stacking_grids, not by its own plot()
+    target_key = "tsz"  # the stacked channel — orders the rows of the grids
+    target_label = r"stacked $|\Delta T|$ [$\mu$K]"
+    row_title = "tSZ on tSZ clusters"
 
     @staticmethod
     def _bin_label(smin, smax):
@@ -949,7 +1198,11 @@ class TszStacking(Statistic):
         ref_mean = p.get("snr_ref_mean", tsz.mean())
         ref_std = p.get("snr_ref_std")  # None → per-map std inside the selector
         maps = sign * (tsz - ref_mean)
-        result = {"sign": np.array(sign), "cutout_pix": np.array(cutout)}
+        result = {
+            "sign": np.array(sign),
+            "cutout_pix": np.array(cutout),
+            "n_maps": np.array(len(tsz)),
+        }
         half = cutout // 2
         idx = np.indices((cutout, cutout)).astype(float)
         xy = ((idx[0] - half) * dx_arcmin / 60.0, (idx[1] - half) * dx_arcmin / 60.0)
@@ -968,41 +1221,12 @@ class TszStacking(Statistic):
             )
         return result
 
-    def plot(self, results, plot_path):
-        labels = [self._bin_label(smin, smax) for smin, smax in self.params["snr_bins"]]
-        plt, fig, axes = _subplots(len(labels), nrows=2, height=3.4)
-        for col, label in enumerate(labels):
-            ax_img, ax_prof = axes[col], axes[len(labels) + col]
-            agora = results.get("agora", {})
-            if f"stack_{label}" in agora:
-                ax_img.imshow(agora[f"stack_{label}"], cmap="RdBu_r")
-            ax_img.set_title(f"Agora stack, SNR {label}")
-            ax_img.axis("off")
-            for src, r in self._ordered(results):
-                if f"profile_{label}" not in r:
-                    continue
-                prof = r[f"profile_{label}"]
-                ax_prof.errorbar(
-                    prof[:, 0],
-                    prof[:, 1],
-                    yerr=prof[:, 2],
-                    color=SOURCE_COLORS[src],
-                    label=f"{src} (n={int(r[f'n_{label}'])})",
-                    marker=".",
-                )
-            ax_prof.set_xlabel("radius [arcmin]")
-            ax_prof.set_ylabel("stacked |ΔT|")
-            ax_prof.legend(fontsize=7)
-        fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
-        plt.close(fig)
-
     def summarise(self, results):
         lines = []
         for smin, smax in self.params["snr_bins"]:
             label = self._bin_label(smin, smax)
-            counts = {src: int(r[f"n_{label}"]) for src, r in results.items() if f"n_{label}" in r}
-            lines.append(f"tsz_stacking[{label}]: stacked peaks {counts}")
+            rates = _peaks_per_map(results, label)
+            lines.append(f"tsz_stacking[{label}]: peaks/map {rates}")
         return lines
 
 
@@ -1024,9 +1248,11 @@ class _ClusterStack(Statistic):
     """
 
     n_field = True
+    grid_plot = True  # drawn by _plot_stacking_grids, not by its own plot()
     select_key = "tsz"
     target_key = None
     target_label = ""
+    row_title = ""
 
     def _target(self, arr):
         return arr
@@ -1051,7 +1277,11 @@ class _ClusterStack(Statistic):
         ref_mean = p.get("snr_ref_mean", tsz.mean())
         ref_std = p.get("snr_ref_std")
         sel = sign * (tsz - ref_mean)
-        result = {"sign": np.array(sign), "cutout_pix": np.array(cutout)}
+        result = {
+            "sign": np.array(sign),
+            "cutout_pix": np.array(cutout),
+            "n_maps": np.array(len(tsz)),
+        }
         half = cutout // 2
         idx = np.indices((cutout, cutout)).astype(float)
         xy = ((idx[0] - half) * dx_arcmin / 60.0, (idx[1] - half) * dx_arcmin / 60.0)
@@ -1070,46 +1300,17 @@ class _ClusterStack(Statistic):
             )
         return result
 
-    def plot(self, results, plot_path):
-        labels = [self._bin_label(smin, smax) for smin, smax in self.params["snr_bins"]]
-        plt, fig, axes = _subplots(len(labels), nrows=2, height=3.4)
-        for col, label in enumerate(labels):
-            ax_img, ax_prof = axes[col], axes[len(labels) + col]
-            agora = results.get("agora", {})
-            if f"stack_{label}" in agora:
-                ax_img.imshow(agora[f"stack_{label}"], cmap="RdBu_r")
-            ax_img.set_title(f"Agora stack, SNR {label}")
-            ax_img.axis("off")
-            for src, r in self._ordered(results):
-                if f"profile_{label}" not in r:
-                    continue
-                prof = r[f"profile_{label}"]
-                ax_prof.errorbar(
-                    prof[:, 0],
-                    prof[:, 1],
-                    yerr=prof[:, 2],
-                    color=SOURCE_COLORS[src],
-                    label=f"{src} (n={int(r[f'n_{label}'])})",
-                    marker=".",
-                )
-            ax_prof.set_xlabel(r"$\theta$ [arcmin]")
-            ax_prof.set_ylabel(self.target_label)
-            ax_prof.legend(fontsize=7)
-        fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
-        plt.close(fig)
-
     def summarise(self, results):
         lines = []
         for smin, smax in self.params["snr_bins"]:
             label = self._bin_label(smin, smax)
             peak = {
-                src: float(r[f"stack_{label}"][r[f"stack_{label}"].shape[0] // 2].max())
+                src: round(float(r[f"stack_{label}"][r[f"stack_{label}"].shape[0] // 2].max()), 4)
                 for src, r in results.items()
                 if f"stack_{label}" in r
             }
-            counts = {src: int(r[f"n_{label}"]) for src, r in results.items() if f"n_{label}" in r}
-            lines.append(f"{self.name}[{label}]: n={counts}, central peak≈{peak}")
+            rates = _peaks_per_map(results, label)
+            lines.append(f"{self.name}[{label}]: peaks/map {rates}, central peak≈{peak}")
         return lines
 
 
@@ -1119,7 +1320,8 @@ class KappaOnTszStacking(_ClusterStack):
 
     name = "kappa_on_tsz_stacking"
     target_key = "kappa"
-    target_label = r"stacked $\kappa$"
+    target_label = r"stacked $\kappa$ [dimensionless]"
+    row_title = r"$\kappa$ on tSZ clusters"
 
 
 class KszStacking(_ClusterStack):
@@ -1129,10 +1331,99 @@ class KszStacking(_ClusterStack):
 
     name = "ksz_stacking"
     target_key = "ksz"
-    target_label = r"stacked $k_{\mathrm{SZ}}^2\ [\mu\mathrm{K}^2]$"
+    target_label = r"stacked $k_{\mathrm{SZ}}^2$ [$\mu$K$^2$]"
+    row_title = r"$k_{\mathrm{SZ}}^2$ on tSZ clusters"
 
     def _target(self, arr):
         return arr**2
+
+
+def _snr_title(label):
+    """'5-10' -> '$5 < \\nu_{SNR} \\leq 10$'; 'gt20' -> '$\\nu_{SNR} > 20$'."""
+    if label.startswith("gt"):
+        return rf"$\nu_{{\mathrm{{SNR}}}} > {label[2:]}$"
+    lo, hi = label.split("-")
+    return rf"${lo} < \nu_{{\mathrm{{SNR}}}} \leq {hi}$"
+
+
+def _plot_stacking_grids(entries, plots_dir, dx_arcmin, prefix=""):
+    """Two combined figures across every active cluster-stacking statistic:
+    ``<prefix>stacking_profiles.png`` (radial profiles) and
+    ``<prefix>stacking_maps.png`` (the Agora stacked cutouts).  Rows are
+    statistics, columns are SNR bins — a 3x3 grid for the 4-channel run, 1x3
+    for the 2-channel v4 run.
+
+    ``entries`` is a list of ``(stat, results)``; rows are ordered by the
+    stacked channel (CIB, tSZ, kSZ, kappa), not by registry order.
+    """
+    if not entries:
+        return []
+    entries = sorted(entries, key=lambda e: CHANNEL_ORDER.index(e[0].target_key))
+    written = []
+    n_row = len(entries)
+    bins = [entries[0][0]._bin_label(a, b) for a, b in entries[0][0].params["snr_bins"]]
+    n_col = len(bins)
+
+    # --- figure 1: radial profiles, all sources overlaid -------------------
+    plt, fig, axes = _subplots(n_col, nrows=n_row, height=3.4)
+    axes = np.atleast_1d(axes).reshape(n_row, n_col)
+    for r_i, (stat, results) in enumerate(entries):
+        for c_i, label in enumerate(bins):
+            ax = axes[r_i, c_i]
+            for src, r in stat._ordered(results):
+                if f"profile_{label}" not in r:
+                    continue
+                prof = r[f"profile_{label}"]
+                ax.errorbar(
+                    prof[:, 0],
+                    prof[:, 1],
+                    yerr=prof[:, 2],
+                    label=_peak_rate_legend(src, r, label),
+                    marker=".",
+                    lw=1.4,
+                    capsize=2,
+                    **_line_kw(src),
+                )
+            _grid(ax)
+            ax.set_title(f"{stat.row_title} — {_snr_title(label)}", fontsize=10)
+            ax.set_xlabel(r"$\theta$ [arcmin]")
+            ax.set_ylabel(stat.target_label)
+            # peaks/map depends only on the SNR bin (all rows select the same
+            # clusters on the same tSZ map), so one legend per column suffices
+            if r_i == 0:
+                _legend(ax)
+    path = plots_dir / f"{prefix}stacking_profiles.png"
+    _finish(fig, path, "Stacked cluster radial profiles")
+    written.append(path)
+
+    # --- figure 2: the Agora stacked cutouts -------------------------------
+    plt, fig, axes = _subplots(n_col, nrows=n_row, height=3.4)
+    axes = np.atleast_1d(axes).reshape(n_row, n_col)
+    half = None
+    for r_i, (stat, results) in enumerate(entries):
+        agora = results.get("agora", {})
+        for c_i, label in enumerate(bins):
+            ax = axes[r_i, c_i]
+            key = f"stack_{label}"
+            if key not in agora:
+                ax.set_axis_off()
+                continue
+            stack = agora[key]
+            half = 0.5 * stack.shape[0] * dx_arcmin
+            # stacked amplitudes are positive magnitudes -> sequential, CVD-safe
+            # colormap (a diverging map would put its neutral midpoint at an
+            # arbitrary, meaningless value)
+            im = ax.imshow(stack, cmap="cividis", origin="lower", extent=[-half, half, -half, half])
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03).set_label(
+                stat.target_label, fontsize=8
+            )
+            ax.set_title(f"{stat.row_title} — {_snr_title(label)}", fontsize=10)
+            ax.set_xlabel(r"$\theta_x$ [arcmin]")
+            ax.set_ylabel(r"$\theta_y$ [arcmin]")
+    path = plots_dir / f"{prefix}stacking_maps.png"
+    _finish(fig, path, "Agora stacked cluster cutouts")
+    written.append(path)
+    return written
 
 
 # ---------------------------------------------------------------------------
@@ -1144,6 +1435,7 @@ class PeakCounts(Statistic):
     name = "peak_counts"
     n_field = True
     count_fn = staticmethod(count_peaks_binned)
+    FIGURE_TITLE = r"Peak counts vs threshold $\nu$"
 
     def compute(self, maps, source):
         p = self.params
@@ -1166,31 +1458,52 @@ class PeakCounts(Statistic):
         for row, key in enumerate(keys):
             for col, fwhm in enumerate(scales):
                 ax = axes[row, col]
+                peak = 0.0
                 for src, r in self._ordered(results):
                     arr = r[f"{key}_fwhm{fwhm:g}"]
-                    ax.errorbar(
-                        r["bin_centers"],
-                        arr.mean(axis=0),
-                        yerr=arr.std(axis=0),
+                    mean, std = arr.mean(axis=0), arr.std(axis=0)
+                    ax.stairs(
+                        mean,
+                        r["thresholds"],
                         color=SOURCE_COLORS[src],
-                        label=src,
-                        marker=".",
-                        ms=3,
+                        ls=SOURCE_LINESTYLES[src],
+                        label=_src_label(src),
+                        lw=1.4,
                     )
-                ax.set_yscale("log")
-                ax.set_title(f"{_channel_display(key)}, FWHM {fwhm:g}'")
-                if row == len(keys) - 1:
-                    ax.set_xlabel(r"$\nu = T/\sigma$")
+                    ax.fill_between(
+                        r["bin_centers"],
+                        mean - std,
+                        mean + std,
+                        color=SOURCE_COLORS[src],
+                        alpha=0.15,
+                        step="mid",
+                        lw=0,
+                    )
+                    peak = max(peak, float(np.max(mean + std)) if mean.size else 0.0)
+                # Each panel autoscales to its OWN counts, so a channel/scale
+                # with few peaks is not squashed flat by a busier neighbour.
+                # symlog spans the wide count range while still showing the
+                # near-zero bins a log axis hides; but below the linear
+                # threshold symlog degenerates, so a sparse panel goes linear.
+                if peak > 5.0:
+                    ax.set_yscale("symlog", linthresh=1.0)
+                else:
+                    ax.ticklabel_format(axis="y", style="plain", useOffset=False)
+                if peak > 0:
+                    ax.set_ylim(0, peak * 1.35)
+                _grid(ax)
+                ax.set_title(f"{_channel_display(key)}, FWHM $= {fwhm:g}'$")
+                ax.set_ylabel("counts per map")
+                ax.set_xlabel(r"threshold $\nu = f/\sigma$")
                 if row == 0 and col == 0:
-                    ax.legend()
-        fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
-        plt.close(fig)
+                    _legend(ax)
+        _finish(fig, plot_path, self.FIGURE_TITLE)
 
 
 class MinimaCounts(PeakCounts):
     name = "minima_counts"
     count_fn = staticmethod(count_minima_binned)
+    FIGURE_TITLE = r"Minima counts vs threshold $\nu$"
 
 
 # ---------------------------------------------------------------------------
@@ -1289,41 +1602,59 @@ class ScatteringTransforms(Statistic):
                     s1.mean(axis=0),
                     yerr=s1.std(axis=0),
                     color=SOURCE_COLORS[src],
-                    label=src,
+                    ls=SOURCE_LINESTYLES[src],
+                    label=_src_label(src),
                     marker="o",
                     ms=3,
                 )
             ax.set_yscale("log")
+            _grid(ax, minor=True)
             ax.set_xlabel("scale $j$")
-            ax.set_ylabel("$S_1$")
-            ax.set_title(key.upper())
+            ax.set_ylabel(r"$S_1$ [dimensionless]")
+            ax.set_title(rf"$S_1$ coefficients — {_channel_display(key)}")
             if col == 0:
-                ax.legend()
+                _legend(ax)
             ax = axes[2 + col]
             if have_ad:
                 a = results["agora"][f"summary_{key}"]
                 d = results["ddpm"][f"summary_{key}"]
                 resid = (a.mean(axis=0) - d.mean(axis=0)) / (a.std(axis=0) + 1e-30)
-                ax.bar(np.arange(len(resid)), resid, color="steelblue")
-                ax.axhline(0, color="k", lw=0.8)
-            ax.set_xlabel("feature index (S1 ⊕ S2)")
-            ax.set_ylabel(r"(Agora − DDPM)/$\sigma$")
+                ax.bar(np.arange(len(resid)), resid, color=SOURCE_COLORS["ddpm"])
+            _grid(ax, zero=True)
+            ax.set_xlabel(r"feature index ($S_1 \oplus S_2$)")
+            ax.set_ylabel(r"(Agora $-$ DDPM)/$\sigma$")
+            ax.set_title(rf"$S_1 \oplus S_2$ residuals — {_channel_display(key)}")
         # scattering covariance residuals (report WST tests 3 and 4)
         for i, key in enumerate(cov_keys):
             ax = axes[4 + i]
             a = np.real(results["agora"][f"synth_iso_{key}"])
             d = np.real(results["ddpm"][f"synth_iso_{key}"])
             resid = (a.mean(axis=0) - d.mean(axis=0)) / (a.std(axis=0) + 1e-30)
-            ax.plot(resid, lw=0.7, color="steelblue")
-            ax.axhline(0, color="k", lw=0.8)
-            ax.set_xlabel("iso coefficient index (log P00 ⊕ log S1 ⊕ C01 ⊕ C11)")
-            ax.set_ylabel(r"(Agora − DDPM)/$\sigma$")
-            ax.set_title(f"scattering covariance — {key}  ({resid.size} coefficients)")
+            # distribution of the per-coefficient residuals — the jagged line
+            # over hundreds/thousands of iso coefficients was unreadable
+            rr = resid[np.isfinite(resid)]
+            ax.hist(
+                np.clip(rr, -3, 3), bins=40, color=SOURCE_COLORS["ddpm"], edgecolor="white", lw=0.3
+            )
+            ax.axvline(0, color="#55555a", lw=0.9, ls="--")
+            frac = float(np.mean(np.abs(rr) < 1.0))
+            _grid(ax)
+            ax.set_xlabel(r"(Agora $-$ DDPM)/$\sigma$ per coefficient")
+            ax.set_ylabel("count [coefficients]")
+            label = "cross" if key == "cross" else _channel_display(key)
+            ax.set_title(rf"$C_{{11}}$ residuals — {label}", fontsize=10)
+            ax.text(
+                0.03,
+                0.94,
+                f"{resid.size} coeffs\n{frac:.0%} within $1\\sigma$",
+                transform=ax.transAxes,
+                va="top",
+                ha="left",
+                fontsize=8,
+            )
         for j in range(4 + len(cov_keys), len(axes)):
             axes[j].axis("off")
-        fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
-        plt.close(fig)
+        _finish(fig, plot_path, "Scattering transforms")
 
 
 # ---------------------------------------------------------------------------
@@ -1403,7 +1734,12 @@ def main(cfg, run, dry_run=False):
         noise = NoiseModel(ilc_file, mapparams, base_seed=cfg.evaluation.noise_seed)
         print(f"[evaluate] ILC noise loaded from {ilc_file}")
 
+    # figures are tagged by field count ('2f_', '4f_') so the 2- and 4-field
+    # runs' plots stay distinguishable once collected into the report
+    prefix = _field_prefix(len(channel_labels))
+
     summary_lines = []
+    stacking_entries = []
     for name in stat_names:
         stat = STATISTIC_REGISTRY[name](
             cfg.evaluation.params.get(name, {}),
@@ -1421,14 +1757,27 @@ def main(cfg, run, dry_run=False):
                 # sink the whole overnight precompute run
                 print(f"[evaluate] {name}/{src} FAILED: {exc!r}")
                 summary_lines.append(f"{name}/{src}: FAILED — {exc!r}")
-        if results:
-            plot_path = run.plots / f"{name}.png"
+        if results and getattr(stat, "grid_plot", False):
+            # stacking statistics share two combined grids, drawn after the loop
+            stacking_entries.append((stat, results))
+        elif results:
+            plot_path = run.plots / f"{prefix}{name}.png"
             try:
                 stat.plot(results, plot_path)
                 print(f"[evaluate] wrote {plot_path}")
             except Exception as exc:
                 print(f"[evaluate] {name} plot FAILED: {exc!r}")
-            summary_lines.extend(stat.summarise(results))
+            try:
+                summary_lines.extend(stat.summarise(results))
+            except Exception as exc:
+                print(f"[evaluate] {name} summarise FAILED: {exc!r}")
+                summary_lines.append(f"{name}: summarise FAILED — {exc!r}")
+
+    try:
+        for p in _plot_stacking_grids(stacking_entries, run.plots, mapparams[2], prefix=prefix):
+            print(f"[evaluate] wrote {p}")
+    except Exception as exc:
+        print(f"[evaluate] stacking grids plot FAILED: {exc!r}")
 
     summary = run.stats / "summary.md"
     with open(summary, "w") as f:

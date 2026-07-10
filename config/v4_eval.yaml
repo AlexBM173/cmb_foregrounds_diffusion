@@ -107,5 +107,5 @@ evaluation:
     n_thresholds: 30            # report: 30 equally spaced thresholds in [0.05, 0.95]
     threshold_min: 0.05
     threshold_max: 0.95
-    tensor_types: [W012, W200, W201]
+    tensor_types: [W021, W200, W201]
     n_maps: 120

@@ -139,7 +139,7 @@ Extensions are grouped by theme, roughly ordered from most to least directly tra
 **Motivation:** The scalar Minkowski functionals in Figure 6 measure area (M0), perimeter (M1), and Euler characteristic (M2) of excursion sets but discard all directional information. Minkowski tensors are rank-2 tensorial generalisations that additionally encode the *anisotropy* and *orientation* of morphological features — cluster boundary shapes, filament directions — providing a sensitive test of whether the DDPM reproduces the full geometry of the foreground fields, not just their scalar topology.
 
 **Implementation:** `foregrounds_diffusion/morphology.py` — `compute_minkowski_tensors(maps_nhw, norm_fn, thresholds, tensor_types, centred)` returns β = λ_min/λ_max ∈ [0, 1] (anisotropy index) and θ (major-axis orientation) per map per threshold, for three tensor types:
-- **W012** (W^{0,2}_1): boundary normal tensor via Sobel-estimated outward normals n⊗n. Probes isotropy of cluster boundary shapes. Recommended default.
+- **W021** (W^{0,2}_1): boundary normal tensor via Sobel-estimated outward normals n⊗n. Probes isotropy of cluster boundary shapes. Recommended default.
 - **W200** (W^{2,0}_0): area inertia tensor r⊗r over interior pixels. Measures elongation of filled excursion regions.
 - **W201** (W^{2,0}_1): boundary position tensor r⊗r over boundary pixels. Hybrid sensitivity.
 
@@ -147,7 +147,7 @@ See `docs/tutorials/12_minkowski_tensors.ipynb` for β(ν) curves (2×3 grid acr
 
 **Remaining work:** Run the tutorial on the full test set, choose the most informative tensor type(s) for the specific CIB/tSZ morphology, and determine whether the DDPM reproduces the anisotropy of tSZ clusters (which are expected to be mildly anisotropic due to filamentary infall) versus CIB (which should be closer to isotropic on average). A joint CIB×tSZ tensor (cross-channel anisotropy alignment) could be a further extension.
 
-**Starting point:** `docs/tutorials/12_minkowski_tensors.ipynb` — fully runnable; choose between W012/W200/W201 based on the β(ν) plot output.
+**Starting point:** `docs/tutorials/12_minkowski_tensors.ipynb` — fully runnable; choose between W021/W200/W201 based on the β(ν) plot output.
 
 **Obstacle:** Sobel-based normal estimation has O(1 pixel) error on sharp boundaries; this is negligible for the 256×256 patches in use but could matter for very small excursion sets (ν near 0.95). Smoothing the binary mask before gradient estimation is a simple fix if needed. Interpretation requires care at extreme thresholds where excursion sets are nearly empty or nearly full — those entries are already masked to β = 1 in the implementation.
 

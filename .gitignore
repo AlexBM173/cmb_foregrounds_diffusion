@@ -24,6 +24,7 @@ docs/_build/
 # Local data and pipeline run artefacts (patches live in GCS; runs/ holds
 # per-run stat caches, checkpoints and figures)
 docs/tutorials/data/
+data/low_pass/
 runs/
 # Coverage and local agent worktrees
 .coverage

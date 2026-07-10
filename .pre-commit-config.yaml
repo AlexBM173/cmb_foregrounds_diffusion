@@ -14,3 +14,9 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict
+  # Strip notebook outputs on commit so tutorials never re-accumulate the
+  # embedded images/arrays that previously bloated 03 to 2.7 MB.
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.8.1
+    hooks:
+      - id: nbstripout

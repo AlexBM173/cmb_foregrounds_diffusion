@@ -52,3 +52,5 @@ runs/
 # for now; unignore once the report is finalised and the non-deliverable
 # contents have been removed.
 report/
+# Jupyter autosave checkpoints
+.ipynb_checkpoints/

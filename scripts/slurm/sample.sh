@@ -27,6 +27,10 @@ RESCALE_TSZ=""                             # optional post-sampling scalar (pape
 USE_COMPILE=false                          # set to true to torch.compile the U-Net (faster after warm-up)
 USE_WANDB=false                            # set to true to enable WandB logging
 
+# Cluster-specific paths — override via environment or edit here.
+REPO_DIR="${REPO_DIR:-$HOME/cmb_foregrounds_diffusion}"
+VENV_DIR="${VENV_DIR:-$HOME/diffusion_project_env}"
+
 # ---------------------------------------------------------------------------
 
 echo "================================================"
@@ -42,7 +46,7 @@ echo "================================================"
 mkdir -p logs
 
 module load cuda/11.8
-source ~/diffusion_project_env/bin/activate
+source "${VENV_DIR}/bin/activate"
 
 export OMP_NUM_THREADS=4
 export TOKENIZERS_PARALLELISM=false
@@ -71,7 +75,7 @@ if [ "${USE_COMPILE}" = "true" ]; then
 fi
 
 accelerate launch --multi_gpu --num_processes 4 \
-    ~/cmb_foregrounds_diffusion/foregrounds_diffusion/sample.py \
+    "${REPO_DIR}/foregrounds_diffusion/sample.py" \
     --checkpoint "${CHECKPOINT}" \
     --batches "${BATCHES}" \
     --batch-size "${BATCH_SIZE}" \

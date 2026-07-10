@@ -12,6 +12,19 @@ source activate_diffusion_project_env.sh
 
 ## Common Commands
 
+The current default workflow is config-driven via `run.py` (one YAML per run):
+
+```bash
+python run.py train    --config config/v5_4ch.yaml   # → runs/<run_name>/checkpoints/
+python run.py sample   --config config/v5_4ch.yaml   # → runs/<run_name>/samples/
+python run.py evaluate --config config/v5_4ch.yaml   # → runs/<run_name>/{stats,plots}/
+python config/validate.py config/v5_4ch.yaml         # validate a config
+```
+
+The legacy flag-based entry points below still work (the root `train.py` is a
+shim over `pipeline/train.py`); they write to `results/<run>/` rather than
+`runs/<run>/` and do not read the YAML config.
+
 ```bash
 # Train the model (from repo root)
 accelerate launch train.py --run-name my_run_v1
@@ -46,21 +59,24 @@ accelerate launch foregrounds_diffusion/sample.py \
 
 Edit the variables at the top of each script, then submit:
 
+The SLURM scripts live in `scripts/slurm/`. Override `REPO_DIR`/`VENV_DIR`
+(env vars or edit in-script) for the cluster paths, then submit:
+
 ```bash
-sbatch train_slurm.sh    # single GPU, 1-12h wall time
-sbatch sample_slurm.sh   # 4 GPUs, 2h wall time
+sbatch scripts/slurm/train.sh    # single GPU, 1-12h wall time
+sbatch scripts/slurm/sample.sh   # 4 GPUs, 2h wall time
 ```
 
 Key variables in each script:
 
 | Script | Variable | Purpose |
 |---|---|---|
-| `train_slurm.sh` | `RUN_NAME` | Run label; checkpoints go to `results/<RUN_NAME>/` |
-| `train_slurm.sh` | `USE_WANDB` | `true` / `false` — enables `--wandb` flag |
-| `sample_slurm.sh` | `CHECKPOINT` | Path to `.pt` checkpoint to sample from |
-| `sample_slurm.sh` | `OUTPUT` | Output `.npy` path |
-| `sample_slurm.sh` | `BATCHES` / `BATCH_SIZE` | Total samples = `BATCHES × BATCH_SIZE × 4` GPUs |
-| `sample_slurm.sh` | `USE_WANDB` | `true` / `false` — enables `--wandb` flag |
+| `scripts/slurm/train.sh` | `RUN_NAME` | Run label; checkpoints go to `results/<RUN_NAME>/` |
+| `scripts/slurm/train.sh` | `USE_WANDB` | `true` / `false` — enables `--wandb` flag |
+| `scripts/slurm/sample.sh` | `CHECKPOINT` | Path to `.pt` checkpoint to sample from |
+| `scripts/slurm/sample.sh` | `OUTPUT` | Output `.npy` path |
+| `scripts/slurm/sample.sh` | `BATCHES` / `BATCH_SIZE` | Total samples = `BATCHES × BATCH_SIZE × 4` GPUs |
+| `scripts/slurm/sample.sh` | `USE_WANDB` | `true` / `false` — enables `--wandb` flag |
 
 ## Weights & Biases
 
@@ -96,7 +112,6 @@ The pipeline is:
 | `scattering_stats.py` | Scattering transform statistics: `compute_scattering_coefficients` (S1, S2), `compute_scattering_covariance` (C11, Cheng et al. backend only), `scattering_summary`. Requires Cheng et al. repo or `kymatio`. |
 | `train.py` | Training entry point (not a library module — run via `accelerate launch`). CLI: `--run-name`, `--steps`, `--batch-size`, `--lr`, `--save-every`, `--num-samples` (0 skips milestone sampling), `--resume` (continue from latest `model-*.pt`), `--wandb` |
 | `sample.py` | Sampling entry point. CLI: `--checkpoint`, `--batches`, `--batch-size`, `--output`, `--channels`, `--sampling-timesteps` (DDIM), `--rescale-cib`/`--rescale-tsz` (opt-in post-sampling scalar rescaling, paper §3.2), `--compile` (torch.compile the U-Net), `--wandb` |
-| `redundant/` | Old scripts kept for reference; not part of the active codebase |
 
 ### Key data conventions
 

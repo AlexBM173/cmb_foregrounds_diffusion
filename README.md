@@ -68,7 +68,7 @@ The pipeline has four stages, each driven by a single YAML config (see
 > z-scored (not scaled to [-1, 1]), the stock diffusion sampler's hard clamp of
 > the predicted clean image to [-1, 1] destroys the output. This repository
 > ships `UnclampedGaussianDiffusion` (`foregrounds_diffusion/sample.py`) to
-> remove that clamp. See `docs/paper_code_inconsistencies.md` §9.
+> remove that clamp.
 
 ## Repository layout
 
@@ -141,12 +141,16 @@ commit, so every result traces back to an exact configuration and code state.
 cp config/default.yaml config/my_run.yaml     # edit run_name, paths, settings
 python config/validate.py config/my_run.yaml  # validate before running
 
-python run.py train    --config config/my_run.yaml   # → runs/<run>/checkpoints/
-python run.py sample   --config config/my_run.yaml   # → runs/<run>/samples/
-python run.py evaluate --config config/my_run.yaml   # → runs/<run>/{stats,plots}/
+python run.py preprocess --config config/my_run.yaml   # checks patches exist (see Data)
+python run.py train      --config config/my_run.yaml   # → runs/<run>/checkpoints/
+python run.py sample     --config config/my_run.yaml   # → runs/<run>/samples/
+python run.py evaluate   --config config/my_run.yaml   # → runs/<run>/{stats,plots}/
 ```
 
-Add `--dry-run` to any stage to print what would run without executing it. The
+Every field the config accepts is documented — inline in `config/default.yaml`
+(the annotated template) and as a reference table in
+`docs/guides/configuration.rst`. Add `--dry-run` to any stage to print what
+would run without executing it. The
 `evaluate` stage caches every statistic under `runs/<run>/stats/*.npz`, so
 re-running it only regenerates figures unless a parameter changes.
 
@@ -177,8 +181,11 @@ four-field run.
 
 ### Preprocessing
 
-The production preprocessing runs as standalone scripts (the path used for the
-actual runs):
+`python run.py preprocess` only **verifies** that the training-ready patches
+named by the config exist — it does not itself produce them. Patch production
+from the raw full-sky maps runs as standalone scripts (the path used for the
+actual runs), which currently use hardcoded paths rather than the YAML; the
+`data:`/`preprocessing:` config sections *document* the choices they bake in:
 
 ```
 scripts/vm_preprocessing/nb01_run.py           # filter halo lightcone
@@ -247,8 +254,48 @@ python run.py evaluate --config config/v5_4ch.yaml    # four-field
 
 With the caches present this recomputes nothing (`N/N cached, 0 recomputed`) and
 only rewrites figures — so plot styling can be iterated for free. See
-`docs/results_writing_plan.md` for the interpretation of the results and
 `CHANGELOG.md` for per-generation provenance.
+
+## Future extensions
+
+Directions that build on the current two-/four-field model, roughly ordered by
+tractability given the existing codebase. Items already realised are noted.
+
+- **Larger sky patches.** Training uses 6°×6° patches and degrades at 10°×10°
+  because the number of independent patches falls as patch-area⁻¹. Patch-diffusion
+  or hierarchical coarse→fine generation could yield coherent realisations over
+  survey-scale areas.
+- **Conditional generation on parameters.** Condition the U-Net on σ₈, Ωm, or
+  feedback amplitude (classifier-free guidance) so the prior can marginalise over
+  simulation/real-sky mismatch. Requires a multi-cosmology training set (WebSky,
+  Agora/BAHAMAS variants).
+- **More foreground components.** kSZ and CMB-lensing κ are already added in the
+  four-field (v5) model; radio galaxies and Galactic dust remain. Sparse,
+  point-source-like fields (radio) are likely better handled by compositing a
+  parametric source model onto the DDPM background than by learning them jointly.
+- **Multi-frequency CIB SED.** Jointly generate CIB at 95/150/857 GHz with an
+  inter-frequency cross-power loss, or condition on a continuous frequency
+  embedding to interpolate to unseen bands — needed for ILC component separation.
+- **DDPM prior in Bayesian inference.** The reverse process exposes the score
+  ∇log p(x); surfacing it as a standalone gradient and combining it with a
+  Gaussian likelihood would let the model act as a foreground prior in
+  lensing/kSZ pipelines (e.g. MUSE).
+- **Faster sampling.** DDIM is available now (`sampling.ddim_steps`); distilling
+  to a consistency model or retraining with flow matching would cut 1000-step
+  generation to a handful of steps for covariance/inference loops.
+- **Better extreme-value pixels.** The dominant failure mode is under-production
+  of rare high-amplitude pixels (massive clusters, bright sources), which drives
+  the tSZ tail and cluster-stacking deficit. Importance-sampling high-SNR patches,
+  `min_snr_loss_weight=True`, or conditional cluster inpainting are candidate fixes.
+- **Real observational data.** Apply `FlatCutter` to SPT-3G/ACT maps and compare
+  spectra, histograms, and Minkowski functionals against DDPM samples to test the
+  Agora simulation and the model together (requires noise/beam modelling).
+- **Paper-faithful preprocessing.** Bring the masking pipeline fully in line with
+  the published method: flux-based (mJy) point-source masking, Gaussian inpainting
+  of masked regions (vs zero-fill), and θ₅₀₀c-scaled cluster mask radii.
+- **Extra validation statistics (implemented).** Wavelet scattering transforms
+  (`scattering_stats.py`) and Minkowski tensors (`morphology.py`) were added as
+  non-Gaussian diagnostics beyond the paper's power-spectrum/MF/moment suite.
 
 ## Compute environments
 
@@ -271,6 +318,13 @@ sphinx-build docs/ docs/_build/html   # build docs locally ([docs] extra)
 
 Documentation deploys to https://cmb-foregrounds-diffusion.readthedocs.io/ on
 each push to `main`.
+
+## Contributing
+
+Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
+developer quick start (setup, tests, style, PR flow) and
+`docs/guides/contributing.rst` for the full guide on adding modules, tutorials,
+and config settings.
 
 ## Citation
 

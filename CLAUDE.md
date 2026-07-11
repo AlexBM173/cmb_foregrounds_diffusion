@@ -117,7 +117,7 @@ The pipeline is:
 
 - **Channels-last on disk**: raw `.npy` arrays are `(N, H, W, C)` — transposed to channels-first `(N, C, H, W)` before entering PyTorch
 - **Preprocessing choices**: low-pass filter cuts `ℓ > 7000`; negative pixels from filtering artifacts are zeroed; point sources masked at 2 mJy threshold (masked pixels set to zero, not NaN)
-- **Normalisation**: ⚠ **contested — see `docs/paper_code_inconsistencies.md` #7.** Notebook 03 (the data producer) currently **z-scores both channels** and saves `_zscore_` files with `norm_params = [cib_mean, cib_std, tsz_mean, tsz_std]`; denormalise DDPM output with `denormalize_dm_maps` (`x·std+mean`, both channels). Older docs/notebooks (and `renormalize_dm_maps`) assume CIB min-max to `[0, 1]` (`_zero` suffix) + tSZ std-norm (`_norm` suffix). The checkpoint name `v3_zscore_...` favours z-score. Confirm against the on-disk files and the checkpoint's training normalisation before relying on either.
+- **Normalisation**: ⚠ **contested between notebooks.** Notebook 03 (the data producer) currently **z-scores both channels** and saves `_zscore_` files with `norm_params = [cib_mean, cib_std, tsz_mean, tsz_std]`; denormalise DDPM output with `denormalize_dm_maps` (`x·std+mean`, both channels). Older docs/notebooks (and `renormalize_dm_maps`) assume CIB min-max to `[0, 1]` (`_zero` suffix) + tSZ std-norm (`_norm` suffix). The checkpoint name `v3_zscore_...` favours z-score. Confirm against the on-disk files and the checkpoint's training normalisation before relying on either.
 - **Train/val/test split**: 80/10/10 by default, seeded with `np.random.default_rng(seed=42)`
 - **Model architecture**: U-Net with `dim=64`, `dim_mults=(1,2,4,8)`, `flash_attn=True`, 2 channels, 1000 diffusion timesteps
 
@@ -140,6 +140,5 @@ See `docs/tutorials/01_halo_catalogue.ipynb` through `03_patch_extraction.ipynb`
 ## Reference docs
 
 - `docs/notebook_summaries.md` — description of every notebook in the repo, what each does, and how it maps to paper sections and `foregrounds_diffusion/` module functions.
-- `docs/paper_code_inconsistencies.md` — documented inconsistencies between the paper (Prabhu et al.) and the current codebase, covering masking, normalisation, augmentation, post-sampling rescaling, and noise schedule parameters.
-- `docs/potential_extensions.md` — ten proposed extensions with scientific motivation, implementation starting points, and known obstacles. Covers larger sky patches, conditional generation, additional foreground components, Bayesian integration, faster sampling, and more.
+- The **Future extensions** section of `README.md` — proposed extensions with scientific motivation and starting points (larger sky patches, conditional generation, additional foreground components, Bayesian integration, faster sampling, and more).
 - `docs/tutorials/` — fourteen notebooks (01–14) covering the full pipeline from raw data to results. Notebooks 01–09 are the core tutorial sequence; 10–12 are post-paper extension evaluations (peak/minima counts, scattering transforms, Minkowski tensors); 13 is profiling/benchmarks and 14 generates the paper figures. Each has a summary cell describing inputs, outputs, key module functions, and the corresponding paper section.

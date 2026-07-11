@@ -104,8 +104,7 @@ cib_maps = cib_maps[valid]
 tsz_maps = tsz_maps[valid]
 
 # -------------------------------------------------------------------------
-# 3. Normalise: global z-score, BOTH channels (resolved convention,
-#    docs/paper_code_inconsistencies.md #7)
+# 3. Normalise: global z-score, BOTH channels (resolved convention)
 # -------------------------------------------------------------------------
 cib_mean, cib_std = cib_maps.mean(), cib_maps.std()
 tsz_mean, tsz_std = tsz_maps.mean(), tsz_maps.std()

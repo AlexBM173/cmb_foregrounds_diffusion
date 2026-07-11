@@ -27,7 +27,7 @@ git history alone does not make obvious. Dates are UTC.
   raytraced lensing convergence; kSZ in µK.
 - **Split:** seed 42, `train_size=0.8` → 560 train / 141 test of 701 patches.
 - **Headline result:** DDPM matches the Gaussian core and truncates rare peaks;
-  cluster-stacking deficit in every SNR bin. See `docs/results_writing_plan.md`.
+  cluster-stacking deficit in every SNR bin.
 
 ### v4 — two-channel (CIB + tSZ)
 - **Config:** `config/v4_eval.yaml` · run dir `runs/v4_zscore_2mJy_a100/`
@@ -40,8 +40,8 @@ git history alone does not make obvious. Dates are UTC.
 - This is the generation written up for the MPhil report.
 
 ### v3 — earliest z-score checkpoint (superseded)
-- Referenced only by the checkpoint name `v3_zscore_...` (see
-  `docs/paper_code_inconsistencies.md` §7). No `runs/v3*` directory survives, so
+- Referenced only by the checkpoint name `v3_zscore_...`. No `runs/v3*`
+  directory survives, so
   its provenance is undocumented. Established the z-score normalisation scheme
   that v4/v5 inherit, deviating from the paper's min-max (CIB) + std-norm (tSZ).
 
@@ -55,7 +55,7 @@ git history alone does not make obvious. Dates are UTC.
   `scripts/slurm/`.
 - The `x₀`-clamp fix (`UnclampedGaussianDiffusion`, `foregrounds_diffusion/`
   `sample.py`) is required for z-score models; the stock sampler crushes maps
-  into ±1. See `docs/paper_code_inconsistencies.md` §9.
+  into ±1.
 
 > A history rewrite to purge large AGORA FITS blobs (planned) will change all
 > commit SHAs. When it runs, the old→new mapping should be appended here.

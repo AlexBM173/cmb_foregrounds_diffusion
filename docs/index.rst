@@ -15,6 +15,7 @@ and developed as MPhil Project 7 (Data Intensive Science, Cambridge).
    guides/background
    guides/installation
    guides/quickstart
+   guides/configuration
    guides/data_conventions
    guides/contributing
 

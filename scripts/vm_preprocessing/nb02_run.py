@@ -124,8 +124,7 @@ gc.collect()
 # -------------------------------------------------------------------------
 # 3. Cluster mask at NSIDE=2048 (built at output resolution — cheaper).
 #    Note: paper quotes masking radii of 3-5 x theta_500c; the code uses a
-#    flat 3x (howmanythetaforclusters=3) — recorded in
-#    docs/paper_code_inconsistencies.md.
+#    flat 3x (howmanythetaforclusters=3).
 # -------------------------------------------------------------------------
 print("Building apodised cluster mask ...", flush=True)
 cluster_mask = get_apodised_mdpl2_cluster_mask(

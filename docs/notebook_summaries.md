@@ -8,7 +8,7 @@ Descriptions of each notebook in the codebase, their relation to the paper ("Lea
 
 The entry-point for all data preparation. Builds the halo catalogue from 197 lightcone slice files, applies point-source and cluster masking to the full-sky HEALPix maps, low-pass filters at ℓ = 7000, extracts 6°×6° flat-sky patches at 256×256 resolution, min-max normalises them to [0, 1], and saves them as `.npy` files — producing the training data consumed by `train.py`.
 
-**Paper relation:** Implements the pipeline described in §2 and Figure 1 (the four-step flowchart). It is where the discrepancies noted in `paper_code_inconsistencies.md` live: point sources are masked by sigma-clipping in K_CMB rather than via a calibrated mJy threshold, and masked pixels are zeroed rather than Gaussian-inpainted.
+**Paper relation:** Implements the pipeline described in §2 and Figure 1 (the four-step flowchart). It is where the paper–code discrepancies live: point sources are masked by sigma-clipping in K_CMB rather than via a calibrated mJy threshold, and masked pixels are zeroed rather than Gaussian-inpainted.
 
 **Module relation:** Calls `get_patch_centers` and `FlatCutter.rotate_to_pole_and_interpolate` from `preprocessing.py`, and `apply_maxmin_normalization` (defined inline here, later extracted into `preprocessing.py`). The cluster masking uses `get_apodised_mdpl2_cluster_mask` from `masking.py`.
 
@@ -40,7 +40,7 @@ Loads training maps, test maps, and DDPM-generated samples (960 patches), denorm
 
 **Paper relation:** Produces the figures and numbers behind §4.3 (power spectra comparison, Figure 4) and §4.4 (pixel histograms, Figure 5), and Appendix B (multi-frequency correlation coefficients, Figure 9).
 
-**Module relation:** Heavily uses `map2cl` from `flatmaps.py` and `renormalize_dm_maps` from `preprocessing.py`. The post-sampling rescaling done here via `renormalize_dm_maps` is the two-step affine transform flagged in `paper_code_inconsistencies.md` as diverging from the paper's scalar-multiply description.
+**Module relation:** Heavily uses `map2cl` from `flatmaps.py` and `renormalize_dm_maps` from `preprocessing.py`. The post-sampling rescaling done here via `renormalize_dm_maps` is a two-step affine transform that diverges from the paper's scalar-multiply description.
 
 ---
 

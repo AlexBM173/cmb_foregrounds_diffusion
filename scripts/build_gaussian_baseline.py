@@ -27,7 +27,7 @@ from foregrounds_diffusion.moments import measure_cross_spectrum_matrix
 
 # Canonical per-channel patch filenames (mirror nb03b / pipeline.train). kappa
 # is achromatic — no frequency tag. (Consolidation into one shared table is a
-# Tier-1 evaluation-refactor item; see docs/nfield_evaluation_design.md.)
+# possible future evaluation-refactor item.)
 CHANNEL_FILE_TEMPLATES = [
     "CIB_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy",
     "tSZ3_map_150GHz_{res}_st6_zscore_{ptsrc}mJy_lp.npy",

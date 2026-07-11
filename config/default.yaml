@@ -3,14 +3,21 @@
 # =============================================================================
 # One YAML drives the full pipeline:
 #
-#     python run.py train    --config config/default.yaml
-#     python run.py sample   --config config/default.yaml
-#     python run.py evaluate --config config/default.yaml
-#     python run.py all      --config config/default.yaml
+#     python run.py preprocess --config config/default.yaml   # checks patches exist
+#     python run.py train      --config config/default.yaml
+#     python run.py sample     --config config/default.yaml
+#     python run.py evaluate   --config config/default.yaml
+#     python run.py all        --config config/default.yaml
 #
 # Validate without running anything:
 #
 #     python config/validate.py config/default.yaml
+#
+# NOTE: `run.py preprocess` only *verifies* that the training-ready patches
+# exist; it does not produce them. Patch production is done by the standalone
+# scripts in scripts/vm_preprocessing/ (which use hardcoded paths, not this
+# config). The data: and preprocessing: sections below therefore DOCUMENT the
+# choices those scripts bake into the patches. See docs/guides/configuration.rst.
 #
 # Every run creates runs/<run_name>/ containing a copy of this config, its
 # SHA256 hash, and the git commit — so every artefact traces back to an exact
@@ -58,8 +65,7 @@ preprocessing:
   lowpass:
     type: sharp         # sharp | cosine | wiener — filter profile at ell_max
     ell_max: 7000       # low-pass cut-off multipole
-  normalisation: zscore # zscore | minmax — zscore (both channels) is canonical;
-                        # see docs/paper_code_inconsistencies.md #7
+  normalisation: zscore # zscore | minmax — zscore (both channels) is canonical
   point_source_mjy: 2   # flux-density masking threshold at nside_in
   cluster_mask:
     enabled: true

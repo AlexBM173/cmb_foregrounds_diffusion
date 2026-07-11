@@ -147,8 +147,7 @@ def rescale_samples(samples, cib_factor=1.0, tsz_factor=1.0):
     each generated channel by a single global factor: the ratio of the AGORA
     sample standard deviation to the generated sample standard deviation.
     This is a pure scalar multiply, distinct from the affine
-    :func:`renormalize_dm_maps` (see inconsistency #4 in
-    ``docs/paper_code_inconsistencies.md``).
+    :func:`renormalize_dm_maps`.
 
     Parameters
     ----------

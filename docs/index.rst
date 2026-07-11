@@ -2,7 +2,8 @@ foregrounds-diffusion
 =====================
 
 A denoising diffusion probabilistic model (DDPM) pipeline for generating
-correlated CIB and tSZ extragalactic CMB foreground maps.
+jointly-correlated extragalactic CMB foreground maps — CIB and tSZ (two-field,
+v4), extended with kSZ and CMB-lensing convergence κ (four-field, v5).
 
 Built on `denoising-diffusion-pytorch <https://github.com/lucidrains/denoising-diffusion-pytorch>`_
 and developed as MPhil Project 7 (Data Intensive Science, Cambridge).
@@ -16,6 +17,13 @@ and developed as MPhil Project 7 (Data Intensive Science, Cambridge).
    guides/quickstart
    guides/data_conventions
    guides/contributing
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Compute environments
+
+   guides/gcp_colab
+   guides/hpc_slurm
 
 .. toctree::
    :maxdepth: 1

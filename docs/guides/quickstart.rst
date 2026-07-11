@@ -17,7 +17,7 @@ Load patches and measure power spectra
    PATCHES_DIR = Path("data/low_pass/2mJy")
    flatskymapparams = [256, 256, 1.40625, 1.40625]  # [nx, ny, dx, dy] arcmin
 
-   cib_maps = np.load(PATCHES_DIR / "CIB_map_150GHz_256_st6_minmax_2mJy_zero_lp.npy")
+   cib_maps = np.load(PATCHES_DIR / "CIB_map_150GHz_256_st6_zscore_2mJy_lp.npy")
    # shape: (N, 256, 256, 1) — channels-last
 
    agora_cib = cib_maps[:, :, :, 0]   # (N, 256, 256)
@@ -37,7 +37,7 @@ Compute higher-order moments
    from foregrounds_diffusion.flatmaps import get_lpf_hpf
    from foregrounds_diffusion.moments import compute_cross_moments
 
-   tsz_maps = np.load(PATCHES_DIR / "tSZ3_map_150GHz_256_st6_minmax_2mJy_norm_lp.npy")
+   tsz_maps = np.load(PATCHES_DIR / "tSZ3_map_150GHz_256_st6_zscore_2mJy_lp.npy")
    agora_tsz = tsz_maps[:, :, :, 0]
 
    bp_edges = [(300 + i * 720, 300 + (i + 1) * 720) for i in range(8)]

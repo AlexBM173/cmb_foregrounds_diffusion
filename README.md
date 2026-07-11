@@ -6,39 +6,91 @@
 
 ## Overview
 
-This repository implements a denoising diffusion probabilistic model (DDPM) pipeline for generating realistic synthetic maps of extragalactic cosmic microwave background (CMB) foregrounds. The model learns to generate correlated pairs of Cosmic Infrared Background (CIB) and thermal Sunyaev–Zeldovich (tSZ) maps from AGORA cosmological simulations, reproducing the statistical properties—power spectra, higher-order moments, and morphology—of the training data while preserving physically important cross-channel correlations.
+This repository trains a **denoising diffusion probabilistic model (DDPM)** — a
+generative model that learns to synthesise images by reversing a gradual
+noising process — to produce realistic, statistically correlated maps of
+extragalactic microwave-sky foregrounds. Rather than modelling each component
+in isolation, the model generates all channels *jointly*, preserving the
+physical cross-correlations between them.
 
-The DDPM can be deployed as a differentiable prior in Bayesian inference pipelines (e.g., CMB lensing or kSZ analyses), as a tool for forecasting survey noise properties and component separation fidelity, or as a data augmentation pipeline for testing downstream analysis codes. The model is trained on 6°×6° flat-sky patches at 256×256 pixel resolution and includes options for fast sampling via DDIM acceleration.
+Two generations of the model live in this repository:
 
-This work is part of the MPhil in Data Intensive Science programme at the University of Cambridge.
+- **Two-field (v4):** Cosmic Infrared Background (**CIB**) and thermal
+  Sunyaev–Zeldovich (**tSZ**). This is the generation written up in the report.
+- **Four-field (v5):** adds kinetic Sunyaev–Zeldovich (**kSZ**) and CMB-lensing
+  convergence (**κ**).
 
-## Architecture
+The four channels are:
 
-The pipeline consists of three stages:
+| Channel | What it is |
+|---|---|
+| **CIB** | Cosmic Infrared Background — redshifted thermal emission from dust in star-forming galaxies, integrated along the line of sight. Positively skewed, with bright point sources. |
+| **tSZ** | thermal Sunyaev–Zeldovich effect — a CMB spectral distortion from inverse-Compton scattering of CMB photons off hot electrons in galaxy-cluster gas. At 150 GHz it appears as a temperature *decrement* (negative). |
+| **kSZ** | kinetic Sunyaev–Zeldovich effect — a Doppler shift of the CMB imprinted by the bulk line-of-sight velocity of free electrons. Sign-symmetric, so its *mean* vanishes at clusters while its variance does not. |
+| **κ** | CMB-lensing convergence — the projected matter over-density that gravitationally lenses the CMB. Dimensionless; traces the same structures that host clusters, so it correlates with tSZ. |
 
-1. **Data Preparation**: Raw HEALPix maps from the AGORA BAHAMAS simulation (hosted on Globus) are patched into 6°×6° flat-sky cutouts, masked at point-source and cluster thresholds, low-pass filtered at ℓ > 7000, and normalised to training-ready `.npy` arrays.
+The trained model can serve as a differentiable prior in Bayesian inference
+(e.g. CMB-lensing or kSZ pipelines), as a forecasting tool for survey noise and
+component-separation fidelity, or as an augmentation source for testing
+downstream analysis codes. Maps are 6°×6° flat-sky patches at 256×256 pixels.
 
-2. **Training**: Paired CIB and tSZ patches are stacked into 2-channel tensors of shape (N, 2, 256, 256), augmented with 4 rotations × horizontal flip (8× total), and used to train a U-Net-based DDPM via the denoising-diffusion-pytorch library. The U-Net architecture has `dim=64`, `dim_mults=(1,2,4,8)`, and flash attention is enabled for efficiency. The diffusion schedule uses 1000 timesteps with a sigmoid noise schedule.
+This work is part of the MPhil in Data Intensive Science programme at the
+University of Cambridge.
 
-3. **Sampling**: A trained checkpoint generates batches of correlated CIB–tSZ map pairs. Standard sampling uses full DDPM (1000 reverse steps); DDIM sampling with fewer timesteps (e.g., 250 steps) is ~4× faster with minimal quality loss.
+## Pipeline
 
-### Package Modules
+The pipeline has four stages, each driven by a single YAML config (see
+[Quickstart](#quickstart)):
 
-The `foregrounds_diffusion/` package provides the following modules:
+1. **Preprocess** — full-sky **HEALPix** maps (the equal-area sphere
+   pixelisation the raw inputs use) from the **AGORA** simulated-sky package
+   (with cluster gas from the **BAHAMAS** hydrodynamic simulation) are masked at
+   point-source and cluster thresholds, low-pass filtered at ℓ > 7000, cut into
+   6°×6° flat-sky patches, and z-score normalised to training-ready `.npy`
+   arrays.
+2. **Train** — per-channel patches are stacked into `(N, C, 256, 256)` tensors
+   (C = 2 or 4), augmented 8× (4 rotations × horizontal flip), and used to train
+   a **U-Net** DDPM (a convolutional encoder–decoder with skip connections,
+   using memory-efficient *flash attention*) via the
+   `denoising-diffusion-pytorch` library. 1000 diffusion timesteps; `dim=64`
+   for v4, `dim=96` for v5.
+3. **Sample** — a trained checkpoint generates batches of jointly-correlated
+   map stacks. The reported results use full 1000-step ancestral sampling;
+   **DDIM** (a deterministic sampler that skips steps) is available for ~`1000/N`×
+   faster generation at some quality cost.
+4. **Evaluate** — a suite of summary statistics (power/cross spectra,
+   higher-order moments, Minkowski functionals/tensors, cluster stacking,
+   peak/minima counts, scattering transforms) is computed for the Agora test
+   split, a Gaussian baseline, and the DDPM samples, with figures written per
+   run.
+
+> **Note on z-score normalisation and the sampler.** Because the maps are
+> z-scored (not scaled to [-1, 1]), the stock diffusion sampler's hard clamp of
+> the predicted clean image to [-1, 1] destroys the output. This repository
+> ships `UnclampedGaussianDiffusion` (`foregrounds_diffusion/sample.py`) to
+> remove that clamp. See `docs/paper_code_inconsistencies.md` §9.
+
+## Repository layout
+
+The importable package is `foregrounds_diffusion/`; the config-driven stage
+runners live in `pipeline/`.
 
 | Module | Responsibility |
 |---|---|
-| `flatmaps.py` | Flat-sky Fourier utilities: power-spectrum conversion (`map2cl`, `cl2map`), map generation (`make_gaussian_realisation`), radial profiling, polarisation E/B↔Q/U conversion. |
-| `preprocessing.py` | Data normalisation (`apply_maxmin_normalization`, `apply_stdnorm`), HEALPix patch extraction (`FlatCutter`, `get_patch_centers`), Fourier filtering (`get_lpf_hpf`, `bandpass_filter`, `wiener_filter`), and dataset splitting. |
-| `statistics.py` | 2D Gaussian fitting (`gaussian`, `moments`, `fitgaussian`) and summary statistics (`stats`). |
-| `moments.py` | Power-spectrum summaries (`mean_cls`, `mean_cross_cls`) and higher-order moments (`compute_summed_moments`, `compute_cross_moments`). |
-| `morphology.py` | Minkowski functionals (`compute_mfs`) and Minkowski tensors (`compute_minkowski_tensors`). |
-| `stacking.py` | tSZ cluster stacking utilities (`select_snr_pixels`, `extract_cutouts`). |
-| `masking.py` | Flat-sky peak masks (`get_peak_masks`, `inpaint_masked_regions`) and AGORA MDPL2 cluster/point-source masks (`get_point_source_mask_in_healpix`, `get_apodised_mdpl2_cluster_mask`, etc.). |
-| `peak_counts.py` | Peak and minima counting statistics following Sabyr et al. (2024): `smooth_map`, `find_peaks`, `count_peaks_binned`, `compute_peak_minima_counts`. Requires only numpy/scipy. |
-| `scattering_stats.py` | Scattering transform statistics: `compute_scattering_coefficients` (S1, S2), `compute_scattering_covariance` (C11), `scattering_summary`. Supports Cheng et al. or kymatio backends. |
-| `train.py` | Training entry point (run via `accelerate launch train.py`). CLI: `--run-name`, `--steps`, `--batch-size`, `--lr`, `--wandb`. |
-| `sample.py` | Sampling entry point (run via `accelerate launch foregrounds_diffusion/sample.py`). CLI: `--checkpoint`, `--batches`, `--batch-size`, `--output`, `--sampling-timesteps` (DDIM), `--wandb`. |
+| `foregrounds_diffusion/flatmaps.py` | Flat-sky Fourier utilities: `map2cl`/`cl2map`, `make_gaussian_realisation`, `make_correlated_gaussian_fields`, `radial_profile`, E/B↔Q/U conversion. |
+| `foregrounds_diffusion/preprocessing.py` | Normalisation (`apply_maxmin_normalization`, `apply_stdnorm`), HEALPix patch extraction (`FlatCutter`, `get_patch_centers`), Fourier filtering (`get_lpf_hpf`, `wiener_filter`), dataset splitting. |
+| `foregrounds_diffusion/statistics.py` | 2D Gaussian fitting (`fitgaussian`) and summary statistics. |
+| `foregrounds_diffusion/moments.py` | Power-spectrum summaries (`mean_cls`, `mean_cross_cls`) and higher-order moments (`compute_summed_moments`, `compute_cross_moments`). |
+| `foregrounds_diffusion/morphology.py` | Minkowski functionals (`compute_mfs`) and Minkowski tensors (`compute_minkowski_tensors`). |
+| `foregrounds_diffusion/peak_counts.py` | Peak/minima counts (Sabyr et al. 2024); numpy/scipy only. |
+| `foregrounds_diffusion/scattering_stats.py` | Scattering-transform statistics (S1/S2, covariance C01/C11). Cheng et al. or `kymatio` backend. |
+| `foregrounds_diffusion/stacking.py` | tSZ cluster stacking (`select_snr_pixels`, `extract_cutouts`). |
+| `foregrounds_diffusion/masking.py` | Flat-sky peak masks and AGORA/MDPL2 cluster & point-source masks. |
+| `foregrounds_diffusion/plot_style.py` | Shared publication plot style (`apply`). |
+| `foregrounds_diffusion/sample.py` | Sampling entry point + `UnclampedGaussianDiffusion`. |
+| `pipeline/train.py` | Training implementation (invoked by `run.py train`). |
+| `pipeline/evaluate.py` | Cached evaluation-statistics engine (invoked by `run.py evaluate`). |
+| `pipeline/rundir.py` | `runs/<name>/` layout, config stamping, git provenance. |
 
 ## Installation
 
@@ -48,27 +100,7 @@ The `foregrounds_diffusion/` package provides the following modules:
 pip install foregrounds_diffusion
 ```
 
-### Optional Extras
-
-The package includes optional dependencies for additional functionality:
-
-```bash
-# Development and testing
-pip install foregrounds_diffusion[dev]
-
-# Acceleration via Numba and quantimpy (Minkowski functionals)
-pip install foregrounds_diffusion[fast]
-
-# Building Sphinx documentation locally
-pip install foregrounds_diffusion[docs]
-
-# All of the above
-pip install foregrounds_diffusion[dev,fast,docs]
-```
-
-### From Source
-
-Clone the repository and install in editable mode:
+### From source
 
 ```bash
 git clone https://github.com/AlexBM173/cmb_foregrounds_diffusion.git
@@ -76,276 +108,171 @@ cd cmb_foregrounds_diffusion
 pip install -e ".[dev]"
 ```
 
-## Quickstart — config-driven pipeline
-
-One YAML file drives every stage; `config/default.yaml` is the fully
-documented template reproducing the paper pipeline. Each run writes all of
-its artefacts to `runs/<run_name>/` alongside a copy of the config, its
-SHA256 hash, and the git commit, so every result traces back to an exact
-configuration and code state.
+### Optional extras
 
 ```bash
-cp config/default.yaml config/my_run.yaml   # edit run_name, paths, settings
-python config/validate.py config/my_run.yaml
-
-python run.py train    --config config/my_run.yaml   # or: accelerate launch run.py train ...
-python run.py sample   --config config/my_run.yaml
-python run.py evaluate --config config/my_run.yaml
+pip install foregrounds_diffusion[dev]    # pytest + coverage
+pip install foregrounds_diffusion[fast]   # numba + quantimpy (Minkowski functionals)
+pip install foregrounds_diffusion[docs]   # Sphinx toolchain
+pip install foregrounds_diffusion[wandb]  # Weights & Biases logging
 ```
 
-Add `--dry-run` to any stage to print what would run without executing it.
-The original flag-based entry points (`accelerate launch train.py ...`,
-`fd-sample`) remain available and unchanged.
+### Scattering-transform backend (optional)
+
+The scattering-transform statistics prefer the Cheng et al. backend. It is not
+on PyPI, so clone it into the repository root (the loader looks for
+`scattering_transform/scattering/`); if it is absent, the code falls back to
+`kymatio`.
+
+```bash
+git clone https://github.com/SihaoCheng/scattering_transform.git
+git -C scattering_transform checkout 04f36a6   # pinned commit used for the results
+```
+
+## Quickstart
+
+One YAML file drives every stage. `config/default.yaml` is the fully documented
+template; `config/v4_eval.yaml` (two-field) and `config/v5_4ch.yaml` (four-field)
+are the run configs behind the results. Each run writes all artefacts to
+`runs/<run_name>/` alongside a copy of the config, its SHA256 hash, and the git
+commit, so every result traces back to an exact configuration and code state.
+
+```bash
+cp config/default.yaml config/my_run.yaml     # edit run_name, paths, settings
+python config/validate.py config/my_run.yaml  # validate before running
+
+python run.py train    --config config/my_run.yaml   # → runs/<run>/checkpoints/
+python run.py sample   --config config/my_run.yaml   # → runs/<run>/samples/
+python run.py evaluate --config config/my_run.yaml   # → runs/<run>/{stats,plots}/
+```
+
+Add `--dry-run` to any stage to print what would run without executing it. The
+`evaluate` stage caches every statistic under `runs/<run>/stats/*.npz`, so
+re-running it only regenerates figures unless a parameter changes.
+
+The legacy flag-based entry points still work — the root `train.py` is a shim
+over `pipeline/train.py`, and `foregrounds_diffusion/sample.py` runs standalone
+— but they write to `results/<run>/` and do not read the YAML config. Prefer the
+config-driven workflow above.
 
 ## Data
 
-### Globus Collections
+### Globus collections
 
-The raw simulation files are distributed across two Globus collections. You will need a Globus account and the Globus Connect Personal client to transfer them.
+The raw simulation files are distributed across two Globus collections; you need
+a Globus account and Globus Connect Personal to transfer them.
 
-**Collection: Agora** — full-sky HEALPix simulation maps (NSIDE=8192):
+**Collection `Agora`** — full-sky HEALPix maps (NSIDE=8192):
 
 | File | Globus path | Units |
 |---|---|---|
 | `agora_len_mag_cibmap_act_150ghz.fits` | `/components/cib/len/act/nocc/` | Jy/sr |
-| `agora_len_mag_cibmap_act_150ghz.fits` | `/components/cib/len/act/uK/` | µK |
 | `agora_ltszNG_bahamas80_bnd_unb_1.0e+12_1.0e+18_lensed.fits` | `/components/tsz/len/` | Compton-y |
 
-The preprocessing pipeline uses the Jy/sr CIB map and the Compton-y tSZ map. The µK CIB variant is provided for reference.
+kSZ and κ full-sky maps come from the corresponding AGORA components for the
+four-field run.
 
-**Collection: agora** — halo catalogue slices:
-
-| Files | Globus path |
-|---|---|
-| `haloslc_rot_*.npz` | `halolc/` |
-
-The catalogue slices are concatenated and filtered by `docs/tutorials/01_halo_catalogue.ipynb` to produce `data/halo_catalogue/halo_catalogue_m500gt3e14.npz`, which is used by the cluster masking step.
+**Collection `agora`** — halo catalogue slices `haloslc_rot_*.npz` under
+`halolc/`, concatenated and filtered to M₅₀₀c ≥ 3×10¹⁴ M☉ for cluster masking.
 
 ### Preprocessing
 
-The full preprocessing pipeline runs across the first three tutorial notebooks:
-
-1. **`01_halo_catalogue.ipynb`** — concatenates halo catalogue slices, filters to M_500c ≥ 3×10¹⁴ M☉, saves `data/halo_catalogue/halo_catalogue_m500gt3e14.npz`
-2. **`02_masking.ipynb`** — loads raw FITS maps, applies 2 mJy point-source masking and apodised cluster masks, saves `data/cib_150_masked.fits` and `data/tsz_150_masked.fits`
-3. **`03_patch_extraction.ipynb`** — extracts 6°×6° flat-sky patches at 256×256 resolution, low-pass filters at ℓ = 7000, normalises (CIB: z-score; tSZ: z-score), saves training-ready `.npy` arrays
-
-**Expected local data layout after preprocessing:**
+The production preprocessing runs as standalone scripts (the path used for the
+actual runs):
 
 ```
-data/
-├── agora_len_mag_cibmap_act_150ghz.fits         # raw CIB map (from Globus)
-├── agora_ltszNG_bahamas80_...lensed.fits         # raw tSZ map (from Globus)
-├── cib_150_masked.fits                           # after 02_masking
-├── tsz_150_masked.fits                           # after 02_masking
-├── halo_catalogue/
-│   └── halo_catalogue_m500gt3e14.npz             # after 01_halo_catalogue
-└── low_pass/
-    └── 2mJy/
-        ├── CIB_map_150GHz_256_st6_zscore_2mJy_lp.npy   # training-ready CIB
-        ├── tSZ3_map_150GHz_256_st6_zscore_2mJy_lp.npy  # training-ready tSZ
-        ├── gaussian_cib_tsz_2mJy_lp.npy                # Gaussian baseline
-        └── norm_params_2mJy.npy                         # normalisation stats
+scripts/vm_preprocessing/nb01_run.py           # filter halo lightcone
+scripts/vm_preprocessing/nb02_run.py           # 2-channel masking (CIB + tSZ)
+scripts/vm_preprocessing/nb02b_mask_ksz_kappa.py  # kSZ + κ masking (4-channel)
+scripts/vm_preprocessing/nb03_run.py           # 2-channel patch extraction + norm
+scripts/vm_preprocessing/nb03b_extract_4ch.py  # 4-channel patch extraction + norm
 ```
 
-## Quick Start
+The tutorial notebooks `docs/tutorials/01_halo_catalogue.ipynb` →
+`03_patch_extraction.ipynb` mirror the same steps with explanation and are the
+best starting point for understanding the pipeline. Training-ready arrays land
+in `data/low_pass/<ptsrc>mJy/` (e.g. `CIB_map_150GHz_256_st6_zscore_2mJy_lp.npy`,
+`norm_params_2mJy.npy`). These files are large and git-ignored; regenerate them
+from the raw maps or pull them from your own artifact store.
+
+## Running each stage
 
 ### Training
 
-Train a new model with the default configuration:
-
 ```bash
-accelerate launch foregrounds_diffusion/train.py --run-name my_run_v1
+python run.py train --config config/v5_4ch.yaml
 ```
 
-To enable Weights & Biases logging (see the [Weights & Biases](#weights--biases) section for setup):
+Checkpoints and sample previews land in `runs/<run>/checkpoints/`. The split is
+config-controlled (`data.seed`, `data.train_size`) and must match between
+training and evaluation — both default to seed 42 and an 0.8 train fraction
+(560 train / 141 test of 701 patches).
+
+### Sampling
 
 ```bash
-accelerate launch foregrounds_diffusion/train.py --run-name my_run_v1 --wandb
+python run.py sample --config config/v5_4ch.yaml
 ```
 
-Checkpoints are saved to `results/my_run_v1/model-{step}.pt` every 5 steps (configurable via `--checkpoint-freq`).
+For faster DDIM sampling, set `sampling.ddim_steps` in the config (e.g. 250).
+The reported v4/v5 results use full 1000-step ancestral sampling, which runs at
+roughly 10–15 s/patch on an A100.
 
-### Sampling with Full DDPM (1000 steps)
-
-Generate samples from a trained checkpoint:
+### Evaluation
 
 ```bash
-accelerate launch foregrounds_diffusion/sample.py \
-  --checkpoint results/my_run_v1/model-20.pt \
-  --batches 10 \
-  --batch-size 16 \
-  --output data/low_pass/2mJy/samples.npy
+python run.py evaluate --config config/v5_4ch.yaml
 ```
 
-This generates 10 × 16 = 160 correlated CIB–tSZ patch pairs and saves them as a single `.npy` file with shape (160, 2, 256, 256).
+Figures are written to `runs/<run>/plots/` with a `2f_`/`4f_` prefix indicating
+the field count; a one-line-per-statistic `summary.md` lands in
+`runs/<run>/stats/`.
 
-### Sampling with DDIM (250 steps, ~4× faster)
+### Weights & Biases (optional)
 
-Use DDIM for faster sampling with minimal quality loss:
+WandB is opt-in via `--wandb` (or `wandb.enabled` in the config). Set
+`WANDB_API_KEY` in your environment first. Training logs per-step loss and
+milestone sample grids; sampling logs image grids and the output `.npy` as an
+artifact.
+
+## Reproducing the results
+
+The two run directories ship their cached statistics, so the figures can be
+regenerated without re-sampling:
 
 ```bash
-accelerate launch foregrounds_diffusion/sample.py \
-  --checkpoint results/my_run_v1/model-20.pt \
-  --batches 10 \
-  --batch-size 16 \
-  --output data/low_pass/2mJy/samples_ddim250.npy \
-  --sampling-timesteps 250
+python run.py evaluate --config config/v4_eval.yaml   # two-field
+python run.py evaluate --config config/v5_4ch.yaml    # four-field
 ```
 
-The `--sampling-timesteps` argument accepts any integer < 1000. Typical choices are 50 (very fast, ~1s/patch), 100 (fast, ~2s/patch), or 250 (good quality/speed trade-off, ~0.5s/patch).
+With the caches present this recomputes nothing (`N/N cached, 0 recomputed`) and
+only rewrites figures — so plot styling can be iterated for free. See
+`docs/results_writing_plan.md` for the interpretation of the results and
+`CHANGELOG.md` for per-generation provenance.
 
-## Weights & Biases
+## Compute environments
 
-Weights & Biases (WandB) integration is **optional** and off by default. Both training and sampling can log to WandB with the `--wandb` flag.
-
-### Setup
-
-Set your WandB API key before running:
-
-```bash
-export WANDB_API_KEY=<your_key>
-```
-
-To persist the key across sessions, add the line to your `~/.bashrc` or `~/.zshrc`:
-
-```bash
-echo 'export WANDB_API_KEY=<your_key>' >> ~/.bashrc
-```
-
-### Logging
-
-When enabled with the `--wandb` flag:
-
-**Training:**
-- Logs `train/loss` per step
-- Logs CIB and tSZ sample image grids at each checkpoint milestone
-- Project name: `cmb_foregrounds_diffusion`
-
-**Sampling:**
-- Logs sample image grids (visualisation of generated CIB and tSZ patches)
-- Saves the output `.npy` file as a WandB artifact for lineage tracking
-
-### Example with WandB
-
-```bash
-export WANDB_API_KEY=<your_key>
-accelerate launch foregrounds_diffusion/train.py --run-name my_run_v1 --wandb
-```
-
-## SLURM and HPC Clusters
-
-For users with access to HPC clusters running SLURM, two shell scripts are provided to streamline job submission.
-
-### Training on a Single GPU
-
-Edit `train_slurm.sh` to configure your run, then submit:
-
-```bash
-# Edit the variables at the top of the file
-vim train_slurm.sh
-
-# Submit the job
-sbatch train_slurm.sh
-```
-
-**Configuration Variables in `train_slurm.sh`:**
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `RUN_NAME` | `run_v1` | Run label; checkpoints saved to `results/<RUN_NAME>/` |
-| `USE_WANDB` | `false` | Set to `true` to enable Weights & Biases logging |
-
-The script allocates:
-- 1 GPU (Ampere, A100)
-- 8 CPU cores
-- 128 GB RAM
-- 1–12 hour wall time
-
-### Sampling on Four GPUs
-
-Edit `sample_slurm.sh` to configure your sampling run, then submit:
-
-```bash
-# Edit the variables at the top of the file
-vim sample_slurm.sh
-
-# Submit the job
-sbatch sample_slurm.sh
-```
-
-**Configuration Variables in `sample_slurm.sh`:**
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `CHECKPOINT` | `results/run_v1/model-20.pt` | Path to trained checkpoint |
-| `OUTPUT` | `data/low_pass/2mJy/samples.npy` | Output `.npy` file path |
-| `BATCHES` | `10` | Number of sampling batches |
-| `BATCH_SIZE` | `16` | Samples per batch per GPU; total samples = `BATCHES × BATCH_SIZE × 4` |
-| `SAMPLING_TIMESTEPS` | (empty) | Leave empty for full DDPM (1000 steps); set to an integer (e.g., `250`) for DDIM |
-| `USE_WANDB` | `false` | Set to `true` to enable Weights & Biases logging |
-
-The script allocates:
-- 4 GPUs (Ampere, A100)
-- 8 CPU cores per GPU
-- 128 GB RAM
-- 2 hour wall time
-
-### Multi-GPU DDIM Sampling Example
-
-To sample 640 CIB–tSZ patches with DDIM in 250 steps on the cluster:
-
-```bash
-# Edit sample_slurm.sh:
-# BATCHES=10
-# BATCH_SIZE=16
-# SAMPLING_TIMESTEPS=250
-
-sbatch sample_slurm.sh
-# Total samples generated: 10 × 16 × 4 GPUs = 640 patches
-# Expected wall time: ~30 minutes for 250-step DDIM sampling
-```
+- **Local / single machine** — the Quickstart commands above.
+- **Google Cloud + Colab Pro+** — preprocessing on a VM, training/sampling on a
+  Colab A100 with artifacts in a GCS bucket; the resumable launchers are in
+  `scripts/colab/`. See `docs/guides/gcp_colab.rst`.
+- **HPC / SLURM** — batch scripts in `scripts/slurm/` wrap the same entry
+  points; override `REPO_DIR`/`VENV_DIR` for your cluster. See
+  `docs/guides/hpc_slurm.rst`.
 
 ## Development
 
-### Running Tests
-
-Install development dependencies and run the test suite:
-
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -v
+pytest tests/ -v            # test suite
+pre-commit install          # ruff + nbstripout + hygiene hooks
+sphinx-build docs/ docs/_build/html   # build docs locally ([docs] extra)
 ```
 
-### Pre-commit Hooks
-
-Install pre-commit hooks to lint and format code before each commit:
-
-```bash
-pre-commit install
-```
-
-The hooks run ruff for linting and formatting, plus checks for trailing whitespace, YAML/TOML validity, and merge conflicts.
-
-### Building Documentation Locally
-
-Install documentation dependencies and build the Sphinx docs:
-
-```bash
-pip install -e ".[docs]"
-sphinx-build docs/ docs/_build/html
-```
-
-The built HTML documentation will be in `docs/_build/html/index.html`. Alternatively, use:
-
-```bash
-make -C docs html
-```
-
-Documentation is automatically deployed to https://cmb-foregrounds-diffusion.readthedocs.io/ on each push to the `main` branch.
+Documentation deploys to https://cmb-foregrounds-diffusion.readthedocs.io/ on
+each push to `main`.
 
 ## Citation
-
-If you use this code in your research, please cite:
 
 ```bibtex
 @thesis{BlakeMartin2026,
@@ -359,4 +286,4 @@ If you use this code in your research, please cite:
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+MIT License — see the LICENSE file.

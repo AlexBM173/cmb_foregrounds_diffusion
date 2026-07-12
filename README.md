@@ -328,13 +328,24 @@ and config settings.
 
 ## Citation
 
+If you use this software, please cite both the codebase (see
+[`CITATION.cff`](CITATION.cff)) and the accompanying thesis:
+
 ```bibtex
+@software{foregrounds_diffusion,
+  author = {Prabhu, Karthik and Raghunathan, Srinivasan and
+            Blake Martín, Alex and Bolliet, Boris},
+  title  = {foregrounds_diffusion: DDPM pipeline for correlated CIB and tSZ CMB foregrounds},
+  year   = {2026},
+  url    = {https://github.com/AlexBM173/cmb_foregrounds_diffusion},
+}
+
 @thesis{BlakeMartin2026,
-  author    = {Alex Blake Martín},
-  title     = {Learning Correlated Astrophysical Foregrounds with Denoising Diffusion Probabilistic Models},
-  year      = {2026},
-  school    = {University of Cambridge},
-  type      = {MPhil thesis},
+  author = {Alex Blake Martín},
+  title  = {Learning Correlated Astrophysical Foregrounds with Denoising Diffusion Probabilistic Models},
+  year   = {2026},
+  school = {University of Cambridge},
+  type   = {MPhil thesis},
 }
 ```
 

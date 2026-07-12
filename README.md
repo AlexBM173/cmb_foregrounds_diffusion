@@ -341,3 +341,15 @@ and config settings.
 ## License
 
 MIT License — see the LICENSE file.
+
+## Acknowledgements
+
+This project builds on the original
+[`diffusion_model`](https://github.com/Karthikprabhu22/diffusion_model)
+codebase by **Karthik Prabhu** (University of California, Davis) and
+**Srinivasan Raghunathan**, which established the DDPM pipeline for correlated
+CMB foregrounds that this repository extends. It also relies on the
+[`denoising-diffusion-pytorch`](https://github.com/lucidrains/denoising-diffusion-pytorch)
+library by Phil Wang (lucidrains).
+
+The MPhil project was supervised by **Boris Bolliet** (University of Cambridge).

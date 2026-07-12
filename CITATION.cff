@@ -2,9 +2,22 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 title: "foregrounds_diffusion: DDPM pipeline for correlated CIB and tSZ CMB foregrounds"
 authors:
+  # Original authors of the diffusion_model codebase this project builds on
+  - family-names: "Prabhu"
+    given-names: "Karthik"
+    email: kprabhu@ucdavis.edu
+    affiliation: "University of California, Davis"
+  - family-names: "Raghunathan"
+    given-names: "Srinivasan"
+    email: sriniraghuna@gmail.com
   - family-names: "Blake Martín"
     given-names: "Alex"
     email: alexbm173@gmail.com
+    affiliation: "University of Cambridge"
+  # Project supervisor
+  - family-names: "Bolliet"
+    given-names: "Boris"
+    affiliation: "University of Cambridge"
 version: 0.1.1
 license: MIT
 repository-code: "https://github.com/AlexBM173/cmb_foregrounds_diffusion"

@@ -74,6 +74,14 @@ n_neg = (cib_lp < 0).sum()
 print(f"Zeroing {n_neg:,} negative CIB pixels ({100 * n_neg / len(cib_lp):.2f}%)")
 cib_lp[cib_lp < 0] = 0.0
 
+# Zero positive tSZ pixels. The tSZ at 150 GHz is a pure decrement (Compton-y
+# is non-negative and the spectral factor is negative), so the physical signal
+# is <= 0; any positive pixels are Gibbs-ringing artefacts of the low-pass
+# filter. Clip them to keep the field one-sided negative (mirror of CIB above).
+n_pos = (tsz_lp > 0).sum()
+print(f"Zeroing {n_pos:,} positive tSZ pixels ({100 * n_pos / len(tsz_lp):.2f}%)")
+tsz_lp[tsz_lp > 0] = 0.0
+
 # -------------------------------------------------------------------------
 # 2. Extract patches
 # -------------------------------------------------------------------------

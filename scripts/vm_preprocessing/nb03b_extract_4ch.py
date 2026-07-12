@@ -16,7 +16,9 @@ arrays are row-aligned: patch i of CIB, tSZ, kSZ and kappa are the same
 Per-channel choices:
   * CIB   — positive-definite intensity; negative pixels from Gibbs ringing
             around masked bright sources are zeroed (as in the 2-channel run).
-  * tSZ   — two-sided (decrement at 150 GHz); sign kept.
+  * tSZ   — pure decrement at 150 GHz (Compton-y >= 0 times a negative spectral
+            factor), so the physical field is one-sided negative; positive
+            pixels from Gibbs ringing are zeroed (mirror of the CIB treatment).
   * kSZ   — two-sided (sign = line-of-sight velocity direction); sign kept.
             DO NOT zero negatives — that would delete half the signal.
   * kappa — two-sided (over/under-densities); sign kept. DO NOT zero negatives.
@@ -58,12 +60,28 @@ DATA_DIR = PROJECT_ROOT / "data"
 OUT_DIR = DATA_DIR / "low_pass" / f"{PTSRC}mJy"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# (label, masked-FITS name, output .npy name, zero_negatives)
+# (label, masked-FITS name, output .npy name, clip)
+# clip controls how low-pass filter artefacts (Gibbs ringing) are handled:
+#   "zero_neg" — CIB is a non-negative intensity; zero negative pixels.
+#   "zero_pos" — tSZ at 150 GHz is a pure decrement (Compton-y >= 0 times a
+#                negative spectral factor), so the physical field is <= 0; zero
+#                positive pixels to keep it one-sided negative.
+#   None       — kSZ and kappa are genuinely two-sided; keep both signs.
 CHANNELS = [
-    ("CIB", "cib_150_masked.fits", f"CIB_map_150GHz_{NRES}_st6_zscore_{PTSRC}mJy_lp.npy", True),
-    ("tSZ", "tsz_150_masked.fits", f"tSZ3_map_150GHz_{NRES}_st6_zscore_{PTSRC}mJy_lp.npy", False),
-    ("kSZ", "ksz_150_masked.fits", f"kSZ_map_150GHz_{NRES}_st6_zscore_{PTSRC}mJy_lp.npy", False),
-    ("kappa", "kappa_masked.fits", f"kappa_map_{NRES}_st6_zscore_{PTSRC}mJy_lp.npy", False),
+    (
+        "CIB",
+        "cib_150_masked.fits",
+        f"CIB_map_150GHz_{NRES}_st6_zscore_{PTSRC}mJy_lp.npy",
+        "zero_neg",
+    ),
+    (
+        "tSZ",
+        "tsz_150_masked.fits",
+        f"tSZ3_map_150GHz_{NRES}_st6_zscore_{PTSRC}mJy_lp.npy",
+        "zero_pos",
+    ),
+    ("kSZ", "ksz_150_masked.fits", f"kSZ_map_150GHz_{NRES}_st6_zscore_{PTSRC}mJy_lp.npy", None),
+    ("kappa", "kappa_masked.fits", f"kappa_map_{NRES}_st6_zscore_{PTSRC}mJy_lp.npy", None),
 ]
 
 flatskymapparams = [NRES, NRES, PATCH_DEG * 60.0 / NRES, PATCH_DEG * 60.0 / NRES]
@@ -73,7 +91,7 @@ print(f"Pixel resolution: {flatskymapparams[2]:.4f} arcmin")
 # 1. Load each masked map and low-pass filter (lmax capped at 3*nside-1).
 # -------------------------------------------------------------------------
 maps_lp = []
-for label, fits_name, _, zero_neg in CHANNELS:
+for label, fits_name, _, clip in CHANNELS:
     path = DATA_DIR / fits_name
     if not path.exists():
         raise SystemExit(
@@ -88,12 +106,16 @@ for label, fits_name, _, zero_neg in CHANNELS:
     m_lp = hp.alm2map(alm, nside=nside)
     del alm, m
 
-    if zero_neg:
+    if clip == "zero_neg":
         n_neg = int((m_lp < 0).sum())
         print(f"[{label}] zeroing {n_neg:,} negative pixels ({100 * n_neg / len(m_lp):.2f}%)")
         m_lp[m_lp < 0] = 0.0
+    elif clip == "zero_pos":
+        n_pos = int((m_lp > 0).sum())
+        print(f"[{label}] zeroing {n_pos:,} positive pixels ({100 * n_pos / len(m_lp):.2f}%)")
+        m_lp[m_lp > 0] = 0.0
     else:
-        print(f"[{label}] two-sided field — negatives kept")
+        print(f"[{label}] two-sided field — both signs kept")
     maps_lp.append(m_lp)
 
 # -------------------------------------------------------------------------

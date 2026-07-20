@@ -33,21 +33,22 @@ PROJECT_ROOT = Path.home() / "cmb_foregrounds_diffusion"
 
 FREQ = 150.0  # GHz
 PTSRC_THRESH_MJY = 2.0  # mJy threshold at 150 GHz
-# Cluster-mask threshold in FILE units. Verified 2026-07-04: totm500 is
-# M_sun/h, so the paper's 3e14 M_sun cut is 2.03e14 in file units.
-M500C_THRESHOLD = float(os.environ.get("M500C_THRESHOLD", "3e14"))
+# Cluster-mask threshold in FILE units. Resolved 2026-07-04: the catalogue's
+# totm500 is M_sun/h, so the paper's 3e14 M_sun cut is 2.03e14 in file units.
+# This is the corrected default; the 3e14 value over-cuts (see GATE 2 below).
+M500C_THRESHOLD = float(os.environ.get("M500C_THRESHOLD", "2.03e14"))
 NSIDE_IN = 8192
 NSIDE_OUT = 2048
 # uK per unit Compton-y at 150 GHz: g(x) * T_CMB
 TSZ_SPECTRAL_FACTOR = -0.952 * 2.7255e6
-CONV_K_TO_MJY_PER_SR = 375.876  # K per (MJy/sr) at 150 GHz
+CONV_K_TO_MJY_PER_SR = 375.876  # MJy/sr per K (dB/dT) at 150 GHz
 
 CIB_NAME = "agora_len_mag_cibmap_act_150ghz.fits"
 TSZ_NAME = "agora_ltszNG_bahamas80_bnd_unb_1.0e+12_1.0e+18_lensed.fits"
 HALO_CAT = Path(
     os.environ.get(
         "HALO_CAT",
-        PROJECT_ROOT / "data" / "halo_catalogue" / "halo_catalogue_m500gt3e14.npz",
+        PROJECT_ROOT / "data" / "halo_catalogue" / "halo_catalogue_m500gt1e13.npz",
     )
 )
 
@@ -136,12 +137,10 @@ cluster_mask = get_apodised_mdpl2_cluster_mask(
 )
 cluster_frac = 100.0 * (1.0 - cluster_mask.mean())
 print(f"\nGATE 2 — cluster mask removes {cluster_frac:.2f}% of sky.")
-print("         ~3-4%  => catalogue masses are raw M_sun: 3e14 cut is correct, proceed.")
-print(
-    "         ~1%    => masses are M_sun/h: catalogue over-cut, NB01 rerun needed"
-    " (threshold 2.03e14). DO NOT delete the lightcone slices until this passes.\n",
-    flush=True,
-)
+print("         Expect ~1% with the resolved default (2.03e14 file units,")
+print("         m500gt1e13 catalogue): masses are M_sun/h, cut at the paper's")
+print("         3e14 M_sun. A ~3-4% cut means the 3e14 file-unit over-cut is")
+print("         in effect (wrong catalogue/threshold) — stop and check.\n", flush=True)
 
 cib_masked = inpaint_masked_regions(cib_2048 * cluster_mask, cluster_mask, rng=rng)
 tsz_masked = inpaint_masked_regions(tsz_2048 * cluster_mask, cluster_mask, rng=rng)

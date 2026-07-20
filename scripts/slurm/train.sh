@@ -18,21 +18,28 @@
 # Edit these before each submission
 # ---------------------------------------------------------------------------
 RUN_NAME="run_v1"   # checkpoints saved to results/<RUN_NAME>/
+CHANNELS=2          # 2 (CIB+tSZ) or 4 (+kSZ+kappa)
+DIM=64              # U-Net base width (v4=64, v5=96)
 USE_WANDB=false     # set to true to enable Weights & Biases logging
 
 # Cluster-specific paths — override via environment or edit here.
 REPO_DIR="${REPO_DIR:-$HOME/cmb_foregrounds_diffusion}"
 VENV_DIR="${VENV_DIR:-$HOME/diffusion_project_env}"
+DATA_DIR="${DATA_DIR:-${REPO_DIR}/data/low_pass/2mJy}"  # holds the nb03/nb03b .npy patches
 
 # ---------------------------------------------------------------------------
 
 echo "================================================"
 echo "Run name  : ${RUN_NAME}"
+echo "Channels  : ${CHANNELS}  (dim ${DIM})"
+echo "Data dir  : ${DATA_DIR}"
 echo "WandB     : ${USE_WANDB}"
 echo "SLURM job : ${SLURM_JOB_ID}"
 echo "Started   : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "================================================"
 
+# Run from the repo so results/<run> and logs/ resolve to the checkout.
+cd "${REPO_DIR}"
 mkdir -p logs
 
 module load cuda/11.8
@@ -49,4 +56,7 @@ fi
 accelerate launch --num_processes 1 \
     "${REPO_DIR}/train.py" \
     --run-name "${RUN_NAME}" \
+    --channels "${CHANNELS}" \
+    --dim "${DIM}" \
+    --data-dir "${DATA_DIR}" \
     ${WANDB_FLAG}

@@ -37,6 +37,7 @@ evaluation refactor.
 Run:  python nb03b_extract_4ch.py 2>&1 | tee logs/nb03b.log
 """
 
+import os
 from pathlib import Path
 
 import astropy.units as u
@@ -48,7 +49,9 @@ from foregrounds_diffusion.preprocessing import FlatCutter, get_patch_centers
 # -------------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------------
-PROJECT_ROOT = Path.home() / "cmb_foregrounds_diffusion"
+# Repo root: derived from this script's location so it works from any checkout
+# (e.g. an RDS clone), overridable via the PROJECT_ROOT env var.
+PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[2]))
 
 PATCH_DEG = 6.0  # patch side length in degrees
 NRES = 256  # pixels per side

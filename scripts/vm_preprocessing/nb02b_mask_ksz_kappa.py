@@ -63,7 +63,9 @@ from foregrounds_diffusion.masking import (
 # -------------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------------
-PROJECT_ROOT = Path.home() / "cmb_foregrounds_diffusion"
+# Repo root: derived from this script's location so it works from any checkout
+# (e.g. an RDS clone), overridable via the PROJECT_ROOT env var.
+PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[2]))
 
 FREQ = 150.0  # GHz (kSZ is achromatic; label kept for filename parity)
 PTSRC_THRESH_MJY = 2.0  # mJy threshold at 150 GHz (same as CIB/tSZ)

@@ -48,7 +48,10 @@ data:
   step_deg: 6.0         # patch centre spacing in degrees (< patch_deg ⇒ overlap)
   res: 256              # pixels per patch side (6° / 256 px = 1.40625′/px)
   gal_cut_deg: 20.0     # exclude patch centres within this of the Galactic plane
-  pole_cut_deg: 6.0     # exclude patch centres within this of the poles
+  pole_cut_deg: 6.0     # keeps latitude rings pole_cut_deg/2 clear of each pole.
+                        # Rings are quantised by step_size_deg, so at the default
+                        # 6 deg stepping this only moves the southern rings off the
+                        # pole (-90 -> -87); it does not bound patch footprints.
   train_size: 0.8       # train/val/test must sum to 1
   val_size: 0.1
   test_size: 0.1

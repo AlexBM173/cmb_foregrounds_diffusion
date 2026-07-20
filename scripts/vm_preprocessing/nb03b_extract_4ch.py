@@ -131,15 +131,14 @@ cutter = FlatCutter(ang_x=PATCH_DEG * u.deg, ang_y=PATCH_DEG * u.deg, xres=NRES,
 patches = [[] for _ in CHANNELS]  # one list per channel
 for k, (lon, lat) in enumerate(centers):
     # Extract each channel INDEPENDENTLY (one single-map call each). Passing the
-    # whole list at once triggers FlatCutter's spin-2 (Q/U) parallactic rotation
-    # on the LAST TWO maps (preprocessing.py:346-352) — correct for a
-    # polarisation/shear pair, but these are four spin-0 SCALAR fields. That
-    # rotation cross-mixes the last pair (kSZ, kappa); with kSZ ~50 uK and kappa
-    # ~0.6 the kSZ leakage swamps kappa (~80sigma spikes). Single-map calls take
-    # the len==1 branch and skip the rotation, giving pure bounded bilinear
-    # interpolation per scalar field.
+    # whole list at once would (with spin2=True) trigger the spin-2 (Q/U)
+    # parallactic rotation on the LAST TWO maps — correct for a polarisation/
+    # shear pair, but these are four spin-0 SCALAR fields. That rotation
+    # cross-mixes the last pair (kSZ, kappa); with kSZ ~50 uK and kappa ~0.6 the
+    # kSZ leakage swamps kappa (~80sigma spikes). Per-field spin2=False calls
+    # give pure bounded bilinear interpolation per scalar field.
     for c, m in enumerate(maps_lp):
-        patches[c].append(cutter.rotate_to_pole_and_interpolate(lon, lat, m))  # (H, W, 1)
+        patches[c].append(cutter.rotate_to_pole_and_interpolate(lon, lat, m, spin2=False))
     if (k + 1) % 100 == 0:
         print(f"  [{k + 1}/{len(centers)}] patches extracted", flush=True)
 

@@ -92,11 +92,13 @@ print(f"Patch centres (|b| > {GAL_CUT} deg, step {STEP_DEG} deg): {len(centers)}
 
 cutter = FlatCutter(ang_x=PATCH_DEG * u.deg, ang_y=PATCH_DEG * u.deg, xres=NRES, yres=NRES)
 
+# Extract each field on its own. CIB and tSZ are independent scalars, not the
+# (Q, U) components of a spin-2 field, so they must not be rotated into each
+# other -- see FlatCutter.rotate_to_pole_and_interpolate's spin2 note.
 cib_maps, tsz_maps = [], []
 for k, (lon, lat) in enumerate(centers):
-    patch = cutter.rotate_to_pole_and_interpolate(lon, lat, [cib_lp, tsz_lp])
-    cib_maps.append(patch[:, :, 0:1])
-    tsz_maps.append(patch[:, :, 1:2])
+    cib_maps.append(cutter.rotate_to_pole_and_interpolate(lon, lat, cib_lp, spin2=False))
+    tsz_maps.append(cutter.rotate_to_pole_and_interpolate(lon, lat, tsz_lp, spin2=False))
     if (k + 1) % 100 == 0:
         print(f"  [{k + 1}/{len(centers)}] patches extracted", flush=True)
 

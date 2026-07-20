@@ -255,6 +255,13 @@ def get_patch_centers(gal_cut: u.deg, step_size: u.deg, pole_cut: u.deg):
         Half-width of the Galactic-plane exclusion zone in degrees.
     step_size : `~astropy.units.Quantity`
         Stepping distance in Galactic latitude in degrees.
+    pole_cut : `~astropy.units.Quantity`
+        Keeps latitude rings ``pole_cut / 2`` clear of either pole.  Note this
+        bounds the *ring latitudes*, not the patch footprints: a patch centred
+        at the limit still extends over the pole.  Because rings are quantised
+        by ``step_size``, the bound often does not bind at all -- at
+        ``gal_cut=20``, ``step_size=6`` it only shifts the southern rings off
+        the pole (-90 -> -87) and leaves the northern rings untouched.
 
     Returns
     -------
@@ -316,7 +323,7 @@ class FlatCutter:
         self.lons *= u.deg
 
     @u.quantity_input
-    def rotate_to_pole_and_interpolate(self, lon: u.deg, lat: u.deg, ma):
+    def rotate_to_pole_and_interpolate(self, lon: u.deg, lat: u.deg, ma, *, spin2: bool):
         """Rotate the patch grid to *(lon, lat)* and sample the map.
 
         Parameters
@@ -324,15 +331,47 @@ class FlatCutter:
         lon, lat : `~astropy.units.Quantity`
             Sky position of the patch centre.
         ma : ndarray or list of ndarray
-            HEALPix map(s) to sample.
+            HEALPix map(s) to sample.  The permitted count depends on *spin2*
+            (see below); a conflict raises `ValueError`.
+        spin2 : bool, keyword-only, required
+            Whether *ma* holds a spin-2 (polarisation) field.  Must be passed
+            explicitly -- it is never inferred from the number of maps.
+
+            * ``False`` -- every entry is an independent scalar (I) field,
+              sampled on its own.  Any count ``>= 1`` is allowed.
+            * ``True`` -- the **last two** entries are the (Q, U) components of
+              one spin-2 field and are rotated into the patch frame.  Exactly
+              two maps ``[Q, U]`` or three ``[I, Q, U]`` are allowed.
 
         Returns
         -------
         ndarray, shape (xres, yres) or (xres, yres, nmaps)
             Interpolated flat-sky patch(es).
+
+        Raises
+        ------
+        ValueError
+            If the number of maps conflicts with *spin2*: zero maps in either
+            mode, or a count outside ``{2, 3}`` when ``spin2=True``.
+
+        Notes
+        -----
+        *spin2* is required precisely because inferring it from ``len(ma)``
+        caused a real corruption: the rotation mixes the last two maps into
+        each other, so silently applying it to unrelated scalar fields (CIB,
+        tSZ, kSZ, κ) damages both.  The mixing angle grows towards the poles
+        but is non-zero at every latitude.
         """
+        if isinstance(ma, (list, tuple)) and len(ma) == 0:
+            raise ValueError("rotate_to_pole_and_interpolate requires at least one map")
         if hp.pixelfunc.maptype(ma) == 0:
             ma = [ma]
+        n = len(ma)
+        if spin2 and n not in (2, 3):
+            raise ValueError(
+                f"spin2=True expects 2 maps [Q, U] or 3 maps [I, Q, U], got {n}. "
+                "Pass spin2=False to sample independent scalar fields."
+            )
         rotator = hp.Rotator(rot=[lon.to(u.deg).value, lat.to(u.deg).value - 90.0], deg=True)
         self.inv_lon_grid, self.inv_lat_grid = rotator.I(
             self.lons.to(u.deg).value, self.lats.to(u.deg).value, lonlat=True
@@ -342,15 +381,13 @@ class FlatCutter:
             for each in ma
         ]
 
-        if len(m_rot) > 1:
+        if spin2:
             m_rot[-2], m_rot[-1] = _spin2rot(
                 m_rot[-2],
                 m_rot[-1],
                 rotator.angle_ref(self.inv_lon_grid, self.inv_lat_grid, lonlat=True),
             )
             m_rot[-2], m_rot[-1] = _spin2rot(m_rot[-2], m_rot[-1], self.lons.to(u.rad).value)
-        else:
-            m_rot = m_rot[0]
 
         return np.moveaxis(np.array(m_rot).reshape(-1, self.xres, self.yres), 0, -1)
 

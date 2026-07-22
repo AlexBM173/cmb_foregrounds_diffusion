@@ -17,10 +17,12 @@
 # ---------------------------------------------------------------------------
 # Edit these before each submission
 # ---------------------------------------------------------------------------
-RUN_NAME="run_v1"   # checkpoints saved to results/<RUN_NAME>/
-CHANNELS=2          # 2 (CIB+tSZ) or 4 (+kSZ+kappa)
-DIM=64              # U-Net base width (v4=64, v5=96)
-USE_WANDB=false     # set to true to enable Weights & Biases logging
+# These may be set here or overridden from the environment (so preprocess_4ch.sh
+# can chain into training with RUN_NAME=... CHANNELS=4 DIM=96 sbatch train.sh).
+RUN_NAME="${RUN_NAME:-run_v1}"   # checkpoints saved to results/<RUN_NAME>/
+CHANNELS="${CHANNELS:-2}"        # 2 (CIB+tSZ) or 4 (+kSZ+kappa)
+DIM="${DIM:-64}"                 # U-Net base width (v4=64, v5=96)
+USE_WANDB="${USE_WANDB:-false}"  # set to true to enable Weights & Biases logging
 
 # Cluster-specific paths — override via environment or edit here.
 REPO_DIR="${REPO_DIR:-$HOME/cmb_foregrounds_diffusion}"

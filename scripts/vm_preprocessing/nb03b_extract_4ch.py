@@ -60,7 +60,15 @@ GAL_CUT = 20.0  # Galactic-plane exclusion half-width in degrees
 PTSRC = 2  # point-source threshold label (mJy)
 
 DATA_DIR = PROJECT_ROOT / "data"
-OUT_DIR = DATA_DIR / "low_pass" / f"{PTSRC}mJy"
+# Patch output dir. Defaults to data/low_pass/{PTSRC}mJy, but overridable via
+# OUT_DIR so a 4-channel (v5) run does not clobber an existing 2-channel (v4)
+# patch set that shares the default directory (e.g. on CSD3, where v4-clean
+# patches live in data/low_pass/2mJy). Point v5 at e.g. data/low_pass/2mJy_4ch.
+OUT_DIR = (
+    Path(os.environ["OUT_DIR"])
+    if os.environ.get("OUT_DIR")
+    else DATA_DIR / "low_pass" / f"{PTSRC}mJy"
+)
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # (label, masked-FITS name, output .npy name, clip)
